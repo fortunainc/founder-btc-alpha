@@ -1,0 +1,143 @@
+### MIGRATION APPLY (PostgreSQL 17.10 (Homebrew))
+BEGIN
+CREATE SCHEMA
+COMMENT
+CREATE FUNCTION
+COMMENT
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+COMMENT
+COMMENT
+CREATE TABLE
+CREATE INDEX
+COMMENT
+CREATE TABLE
+CREATE INDEX
+COMMENT
+CREATE TABLE
+COMMENT
+CREATE TABLE
+COMMENT
+psql:migrations/001-founder-alpha-v1.sql:272: NOTICE:  trigger "fa_window_capture_append_only" for relation "founder_alpha.fa_window_capture" does not exist, skipping
+psql:migrations/001-founder-alpha-v1.sql:272: NOTICE:  trigger "fa_forecast_seal_append_only" for relation "founder_alpha.fa_forecast_seal" does not exist, skipping
+psql:migrations/001-founder-alpha-v1.sql:272: NOTICE:  trigger "fa_settlement_grade_append_only" for relation "founder_alpha.fa_settlement_grade" does not exist, skipping
+psql:migrations/001-founder-alpha-v1.sql:272: NOTICE:  trigger "fa_hypothesis_ledger_append_only" for relation "founder_alpha.fa_hypothesis_ledger" does not exist, skipping
+psql:migrations/001-founder-alpha-v1.sql:272: NOTICE:  trigger "fa_ontology_versions_append_only" for relation "founder_alpha.fa_ontology_versions" does not exist, skipping
+DO
+DO
+REVOKE
+REVOKE
+REVOKE
+CREATE VIEW
+COMMENT
+CREATE VIEW
+COMMENT
+INSERT 0 1
+INSERT 0 1
+COMMIT
+
+### VERIFICATION SUITE
+Pager usage is off.
+=== 1. All five tables exist with RLS enabled AND forced ===
+      table_name      | rls_enabled | rls_forced | verdict 
+----------------------+-------------+------------+---------
+ fa_forecast_seal     | t           | t          | PASS
+ fa_hypothesis_ledger | t           | t          | PASS
+ fa_ontology_versions | t           | t          | PASS
+ fa_settlement_grade  | t           | t          | PASS
+ fa_window_capture    | t           | t          | PASS
+(5 rows)
+
+
+=== 2. Zero permissive policies => default deny ===
+ policy_count |       verdict       
+--------------+---------------------
+            0 | PASS (default-deny)
+(1 row)
+
+
+=== 3. Seed rows present ===
+        kind         | version | spec_type 
+---------------------+---------+-----------
+ fee-model           | v1      | object
+ replica-methodology | v1      | object
+(2 rows)
+
+ verdict 
+---------
+ PASS
+(1 row)
+
+
+=== 4. fa_forecast_seal MUST be empty in Phase 0 ===
+ rows | verdict 
+------+---------
+    0 | PASS
+(1 row)
+
+
+=== 5. INSERT works (append-only allows inserts) ===
+INSERT 0 4
+INSERT -> PASS (see counts above)
+
+=== 6. UPDATE must be REJECTED by the append-only trigger ===
+psql:scripts/verify-migration.sql:56: ERROR:  founder_alpha.fa_window_capture is append-only; UPDATE is not permitted (attempted by role postgres)
+CONTEXT:  PL/pgSQL function founder_alpha.fa_reject_mutation() line 3 at RAISE
+^^ expected: ERROR 42501 append-only. If you see UPDATE n, that is a FAIL.
+
+=== 7. DELETE must be REJECTED by the append-only trigger ===
+psql:scripts/verify-migration.sql:61: ERROR:  founder_alpha.fa_window_capture is append-only; DELETE is not permitted (attempted by role postgres)
+CONTEXT:  PL/pgSQL function founder_alpha.fa_reject_mutation() line 3 at RAISE
+^^ expected: ERROR 42501 append-only. If you see DELETE n, that is a FAIL.
+
+=== 8. Rows survived the rejected mutations ===
+ surviving_rows | verdict 
+----------------+---------
+              4 | PASS
+(1 row)
+
+
+=== 9. CHECK constraints reject out-of-range prices ===
+psql:scripts/verify-migration.sql:73: ERROR:  new row for relation "fa_window_capture" violates check constraint "fa_window_capture_prices_ck"
+DETAIL:  Failing row contains (5, BAD, null, 2026-07-22 20:24:55.150054-07, 2026-07-22 20:24:55.150054-07, 1.5000, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, us_rth, f, null, null, null, {}).
+^^ expected: ERROR check constraint. If INSERT 0 1, that is a FAIL.
+
+=== 10. CHECK constraint rejects a bad session bucket ===
+psql:scripts/verify-migration.sql:79: ERROR:  new row for relation "fa_window_capture" violates check constraint "fa_window_capture_session_ck"
+DETAIL:  Failing row contains (6, BAD2, null, 2026-07-22 20:24:55.150201-07, 2026-07-22 20:24:55.150201-07, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, lunar, f, null, null, null, {}).
+^^ expected: ERROR check constraint. If INSERT 0 1, that is a FAIL.
+
+=== 11. fa_forecast_seal seal-before-close CHECK ===
+psql:scripts/verify-migration.sql:86: ERROR:  new row for relation "fa_forecast_seal" violates check constraint "fa_forecast_seal_before_close_ck"
+DETAIL:  Failing row contains (1, m, v1, W1, 0.500000, {}, 2026-07-22 20:24:55.150334-07, 2026-07-22 20:23:55.150334-07).
+^^ expected: ERROR check constraint (sealed AFTER close). If INSERT 0 1, that is a FAIL.
+
+=== 12. Settlement grade rows for the views ===
+INSERT 0 3
+
+=== 13. v_fa_replica_error runs and buckets by session + vol tercile ===
+ window_id | session_bucket | vol_tercile | replica_error | abs_replica_error_bps | replica_outcome_agrees 
+-----------+----------------+-------------+---------------+-----------------------+------------------------
+ W1        | us_rth         | low         |          5.00 |                  0.77 | t
+ W2        | asia           | high        |        -15.00 |                  2.31 | t
+ W3        | eu             | mid         |         40.00 |                  6.15 | f
+(3 rows)
+
+
+=== 14. v_fa_capture_health runs and censuses gaps + invariants ===
+    day     | snapshots | windows_seen | final120_snapshots | gaps_over_30s | rows_with_any_flag | invariant_sum_violations | invariant_gap_violations | uptime_pct_of_expected 
+------------+-----------+--------------+--------------------+---------------+--------------------+--------------------------+--------------------------+------------------------
+ 2026-07-23 |         4 |            2 |                  1 |             2 |                  2 |                        1 |                        1 |                   1.11
+(1 row)
+
+
+=== 15. Append-only also enforced on the other four tables ===
+psql:scripts/verify-migration.sql:115: ERROR:  founder_alpha.fa_ontology_versions is append-only; UPDATE is not permitted (attempted by role postgres)
+CONTEXT:  PL/pgSQL function founder_alpha.fa_reject_mutation() line 3 at RAISE
+^^ expected: ERROR 42501 append-only.
+psql:scripts/verify-migration.sql:117: ERROR:  founder_alpha.fa_settlement_grade is append-only; DELETE is not permitted (attempted by role postgres)
+CONTEXT:  PL/pgSQL function founder_alpha.fa_reject_mutation() line 3 at RAISE
+^^ expected: ERROR 42501 append-only.

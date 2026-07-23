@@ -1,0 +1,176 @@
+{
+  "methodology_version": "replica-methodology-v1",
+  "captured_at": "2026-07-23T03:16:15.352Z",
+  "duration_seconds": 75,
+  "ticks_total": 74,
+  "ticks_with_index": 73,
+  "coverage_pct": 98.6,
+  "index_min": 65574.86,
+  "index_max": 65598.68,
+  "index_last": 65585.88,
+  "trailing_60s_average": {
+    "avg": 65589.54,
+    "n": 60
+  },
+  "realized_vol": {
+    "rv_1m": 0.00003167122,
+    "rv_5m": 0.00003529181,
+    "rv_15m": 0.00003529181
+  },
+  "venue_participation_ticks": {
+    "coinbase": 73,
+    "gemini": 73,
+    "bitstamp": 73,
+    "kraken": 50
+  },
+  "venue_health_at_end": {
+    "venues": {
+      "coinbase": {
+        "connected": false,
+        "last_quote_age_ms": 372,
+        "fresh": true
+      },
+      "kraken": {
+        "connected": false,
+        "last_quote_age_ms": 4872,
+        "fresh": true
+      },
+      "bitstamp": {
+        "connected": false,
+        "last_quote_age_ms": 112,
+        "fresh": true
+      },
+      "gemini": {
+        "connected": false,
+        "last_quote_age_ms": 80,
+        "fresh": true
+      }
+    },
+    "stats": {
+      "reconnects": 0,
+      "messages": 6610,
+      "ticks": 74
+    },
+    "window_size": 73
+  },
+  "sample_ticks": [
+    {
+      "ts": 1784776570409,
+      "index": 65585.19,
+      "median_mid": 65583.91,
+      "venues_used": [
+        "coinbase",
+        "gemini",
+        "bitstamp",
+        "kraken"
+      ],
+      "venues_excluded": {},
+      "weight_share": {
+        "coinbase": 0.267486,
+        "gemini": 0.27149,
+        "bitstamp": 0.410868,
+        "kraken": 0.050155
+      },
+      "venue_count": 4
+    },
+    {
+      "ts": 1784776571409,
+      "index": 65585.81,
+      "median_mid": 65583.91,
+      "venues_used": [
+        "coinbase",
+        "gemini",
+        "bitstamp",
+        "kraken"
+      ],
+      "venues_excluded": {},
+      "weight_share": {
+        "coinbase": 0.11608,
+        "gemini": 0.231352,
+        "bitstamp": 0.61001,
+        "kraken": 0.042557
+      },
+      "venue_count": 4
+    },
+    {
+      "ts": 1784776572410,
+      "index": 65585.8,
+      "median_mid": 65583.91,
+      "venues_used": [
+        "coinbase",
+        "gemini",
+        "bitstamp",
+        "kraken"
+      ],
+      "venues_excluded": {},
+      "weight_share": {
+        "coinbase": 0.122164,
+        "gemini": 0.22949,
+        "bitstamp": 0.606131,
+        "kraken": 0.042214
+      },
+      "venue_count": 4
+    },
+    {
+      "ts": 1784776573411,
+      "index": 65585.8,
+      "median_mid": 65583.91,
+      "venues_used": [
+        "coinbase",
+        "gemini",
+        "bitstamp",
+        "kraken"
+      ],
+      "venues_excluded": {},
+      "weight_share": {
+        "coinbase": 0.121561,
+        "gemini": 0.229558,
+        "bitstamp": 0.606654,
+        "kraken": 0.042227
+      },
+      "venue_count": 4
+    },
+    {
+      "ts": 1784776574412,
+      "index": 65585.88,
+      "median_mid": 65583.91,
+      "venues_used": [
+        "coinbase",
+        "gemini",
+        "bitstamp",
+        "kraken"
+      ],
+      "venues_excluded": {},
+      "weight_share": {
+        "coinbase": 0.126563,
+        "gemini": 0.201301,
+        "bitstamp": 0.628403,
+        "kraken": 0.043733
+      },
+      "venue_count": 4
+    }
+  ],
+  "events": [
+    {
+      "t": "2026-07-23T03:15:00.942Z",
+      "event": "open",
+      "venue": "coinbase"
+    },
+    {
+      "t": "2026-07-23T03:15:00.949Z",
+      "event": "open",
+      "venue": "gemini"
+    },
+    {
+      "t": "2026-07-23T03:15:01.466Z",
+      "event": "open",
+      "venue": "bitstamp"
+    },
+    {
+      "t": "2026-07-23T03:15:01.882Z",
+      "event": "open",
+      "venue": "kraken"
+    }
+  ],
+  "status": "VERIFIED"
+}

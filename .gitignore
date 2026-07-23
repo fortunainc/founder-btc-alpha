@@ -26,7 +26,11 @@ node_modules/
 fixtures/private/
 
 # --- local capture artifacts ---
-data/
+# The macro calendar is a checked-in input, not an artifact: a capture row's
+# macro_flag must be re-derivable from the repo at that commit.
+data/*
+!data/macro-calendar.json
+data/capture/
 *.sqlite
 *.sqlite3
 *.db
