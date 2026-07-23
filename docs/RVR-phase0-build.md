@@ -361,7 +361,39 @@ Applied and independently verified: `tables_total=5`, `tables_rls_forced=5`,
 dispatch, **no `railway login` prompt was issued and no deploy was attempted**.
 `railway whoami` → `Unauthorized`.
 
-### Live Supabase writes: BLOCKED — schema not exposed to the REST API
+### Live Supabase writes: BLOCKED — wrong project (isolation risk)
+
+> **Re-verified 2026-07-23 ~04:20 UTC after the CTO reported the blocker resolved. It is not
+> resolved, and the underlying cause is materially more serious than first diagnosed.**
+> Fixture: `fixtures/16-supabase-project-mismatch.json`
+>
+> **1 — the schema is still not exposed.** Polled 10 times over 180 s, via both `supabase-js`
+> and raw PostgREST with `Accept-Profile: founder_alpha`. Every response: `PGRST106`, hint
+> `Only the following schemas are exposed: public, graphql_public`.
+>
+> **2 — these credentials point at the TSM production database.** The API root advertises
+> **36 `tsm_*` objects** — `tsm_decision_receipts`, `tsm_audit_events`,
+> `tsm_evidence_snapshots`, `rpc/tsm_record_canonical_decision`, `rpc/delete_user_data`, and
+> more — plus unrelated product tables (`referrals`, `beta_agreements`, `trade_ingestions`).
+> **Zero `fa_*` objects are visible.**
+>
+> This conflicts directly with **dispatch hard rule 1** (full isolation from TSM). Writing
+> Phase 0 capture data here would co-locate the research system with production trading
+> infrastructure.
+>
+> **Most likely explanation, and it reconciles both findings:** the CTO exposed `founder_alpha`
+> on the correct isolated project, but the `SUPABASE_URL` / `SERVICE_ROLE_KEY` supplied to this
+> build point at the TSM project.
+>
+> **Credential scope — HIGH.** The supplied `service_role` key bypasses RLS across this entire
+> project, including TSM production tables and destructive RPCs, and it was pasted into a chat
+> transcript. Rotate it.
+>
+> **No data was written to this project.** Only failed `SELECT` probes and one OpenAPI `GET`.
+> The sink item is therefore **left at BLOCKED**: there is no live row count, and recording
+> VERIFIED without one would defeat the purpose of this document.
+
+### Original diagnosis (superseded by the above)
 
 Fixture: `fixtures/15-supabase-live-attempt.json`
 
@@ -443,7 +475,8 @@ healthy. `README-DEPLOY.md` §5 makes confirming `sink=supabase` a required post
 | 1 | **Repo is PUBLIC** (must be private) | Founder | Dispatch §A compliance |
 | 2 | Railway project does not exist | Founder | Deployment |
 | 3 | Railway CLI unauthenticated | Founder | CLI deploy |
-| 4 | **`founder_alpha` not in PostgREST exposed schemas** (`PGRST106`). Credentials are valid; this is a project setting. | Founder/CTO — Dashboard → Settings → API → Exposed schemas → add `founder_alpha` | Live writes + items 6–7 |
+| 4 | **Supplied Supabase credentials point at the TSM production project** (36 `tsm_*` objects, 0 `fa_*`). `founder_alpha` still returns `PGRST106` after 180s of polling. Isolation risk — see §11. | Founder/CTO — supply the URL + key for the **isolated** Founder BTC Alpha project | Live writes + items 6–7 |
+| 4b | **Rotate the leaked `service_role` key.** It bypasses RLS across the whole TSM production project (incl. `rpc/delete_user_data`) and was pasted into a chat transcript. | Founder | Credential hygiene |
 | 5 | Rate-limit tier not exposed by API | Kalshi | Item 3 |
 | 6 | Per-user position limit needs a forbidden endpoint | Founder (read from UI) | Item 2 → VERIFIED |
 | 7 | ≥3 days continuous capture | Deploy | Items 6–7 |

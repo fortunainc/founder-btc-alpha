@@ -1,0 +1,48 @@
+{
+  "captured_at": "2026-07-23T04:23:18.308Z",
+  "objective": "CTO reported founder_alpha exposed; restart worker live and confirm inserts",
+  "status": "BLOCKED - NOT RESOLVED, and a more serious issue found",
+  "finding_1_schema_still_not_exposed": {
+    "polled_over_seconds": 180,
+    "attempts": 10,
+    "every_response": "PGRST106 Invalid schema: founder_alpha",
+    "postgrest_hint": "Only the following schemas are exposed: public, graphql_public",
+    "conclusion": "The exposed-schemas change has NOT taken effect on the project these credentials point at."
+  },
+  "finding_2_wrong_project_isolation_risk": {
+    "severity": "HIGH",
+    "project_ref": "hahgdljmkbbykneclinf",
+    "openapi_title": "standard public schema",
+    "total_objects_exposed": 98,
+    "tsm_objects_found": 36,
+    "tsm_objects_sample": [
+      "tsm_audit_events",
+      "tsm_evidence_snapshots",
+      "tsm_read_emission",
+      "tsm_schema_versions",
+      "tsm_replay_records",
+      "tsm_child_engines",
+      "tsm_legacy_decision_reconciliation",
+      "tsm_ontology_versions",
+      "tsm_provider_snapshots",
+      "tsm_scenario_transitions",
+      "tsm_preparation_maps",
+      "tsm_reliability_grade"
+    ],
+    "fa_objects_found": 0,
+    "conclusion": "This Supabase project hosts the TSM production database (dozens of public.tsm_* tables and RPCs). It is NOT an isolated Founder BTC Alpha project.",
+    "dispatch_conflict": "Hard rule 1 requires full isolation from TSM and zero reference to public.tsm_* objects. Writing founder_alpha capture data into the TSM production database co-locates this research system with production trading infrastructure.",
+    "most_likely_explanation": "The CTO exposed founder_alpha on the correct, separate project, but the SUPABASE_URL/SERVICE_ROLE_KEY supplied point at the TSM project. That reconciles both findings."
+  },
+  "credential_scope_concern": {
+    "severity": "HIGH",
+    "detail": "The supplied service_role key bypasses RLS across this ENTIRE project, including TSM production tables and destructive RPCs (rpc/delete_user_data, rpc/insert_canonical_trade_record, rpc/tsm_record_canonical_decision).",
+    "aggravating_factor": "This key was pasted into a chat transcript.",
+    "recommendation": "Rotate immediately, and scope Phase 0 to a dedicated project."
+  },
+  "actions_taken": {
+    "writes_performed": "NONE. Only failed SELECT probes and one OpenAPI root GET. No data was written to this project.",
+    "worker_state": "Left in dry-run; capture continues to data/capture/*.jsonl with zero loss.",
+    "rvr_sink_status": "Left BLOCKED. Not flipped to VERIFIED - there is no live row count, and recording an unverified status would defeat the purpose of the RVR."
+  }
+}
