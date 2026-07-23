@@ -1,0 +1,26 @@
+# --- SECRETS: never commit ---
+.env
+.env.*
+!.env.example
+kalshi-key.txt
+*.pem
+*.key
+*_rsa
+id_*
+
+# --- deps ---
+node_modules/
+
+# --- private fixtures (may contain account-identifying data) ---
+fixtures/private/
+
+# --- local capture artifacts ---
+data/
+*.sqlite
+*.sqlite3
+*.db
+logs/
+*.log
+
+# --- os ---
+.DS_Store
