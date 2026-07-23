@@ -361,11 +361,42 @@ Applied and independently verified: `tables_total=5`, `tables_rls_forced=5`,
 dispatch, **no `railway login` prompt was issued and no deploy was attempted**.
 `railway whoami` → `Unauthorized`.
 
-### Live Supabase writes: BLOCKED
+### Live Supabase writes: BLOCKED — schema not exposed to the REST API
 
-The migration is applied, but `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are **absent from
-`.env`** — verified by name-only presence check. The worker therefore still runs against the
-dry-run sink.
+Fixture: `fixtures/15-supabase-live-attempt.json`
+
+Credentials were supplied (2026-07-23 ~04:10 UTC) and are **valid** — they are *not* the
+blocker:
+
+- REST root → **HTTP 200**
+- `public` schema probe → `PGRST205` (table-not-found), i.e. PostgREST reachable, key accepted
+- JWT decodes as `role=service_role`, `ref=hahgdljmkbbykneclinf`
+
+Writing to the target schema fails:
+
+```
+PGRST106  Invalid schema: founder_alpha
+          Only the following schemas are exposed: public, graphql_public
+```
+
+**Root cause:** `founder_alpha` exists and is verified in production (§10), but is not in
+PostgREST's exposed-schemas list, so the Data API refuses to serve it. This is a project
+setting; a service-role key cannot change it.
+
+Two incidental corrections made while wiring this up:
+
+1. The supplied `SUPABASE_URL` was the REST endpoint (`…supabase.co/rest/v1/`). `supabase-js`
+   appends `/rest/v1` itself, so it was normalised to the base project URL; left as given it
+   would have requested `/rest/v1/rest/v1/…`.
+2. **Sink robustness (real production risk, now fixed).** Failed flushes were re-queued
+   in memory with no bound. A sustained Supabase outage on Railway would have grown the queue
+   until the container OOMed — losing exactly the data the requeue was meant to protect. The
+   sink now spills to `data/spill/*.jsonl` after 3 consecutive failures or >5,000 pending rows.
+   Verified: 10 rows spilled, pending returned to 0, zero rows lost.
+
+**Interim state:** the worker was restarted in dry-run and is capturing continuously to
+`data/capture/*.jsonl`. No data is being lost. `scripts/backfill.js` loads everything on disk
+into Supabase once the schema is exposed (`--check` preflight, `--dry` report, then live).
 
 Note the deliberate failure mode: **missing Supabase config does not crash the worker**, it
 silently falls back to dry-run. That prevents data loss but means a mis-set variable *looks*
@@ -412,7 +443,7 @@ healthy. `README-DEPLOY.md` §5 makes confirming `sink=supabase` a required post
 | 1 | **Repo is PUBLIC** (must be private) | Founder | Dispatch §A compliance |
 | 2 | Railway project does not exist | Founder | Deployment |
 | 3 | Railway CLI unauthenticated | Founder | CLI deploy |
-| 4 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` absent | Founder | Live writes (migration itself is done) |
+| 4 | **`founder_alpha` not in PostgREST exposed schemas** (`PGRST106`). Credentials are valid; this is a project setting. | Founder/CTO — Dashboard → Settings → API → Exposed schemas → add `founder_alpha` | Live writes + items 6–7 |
 | 5 | Rate-limit tier not exposed by API | Kalshi | Item 3 |
 | 6 | Per-user position limit needs a forbidden endpoint | Founder (read from UI) | Item 2 → VERIFIED |
 | 7 | ≥3 days continuous capture | Deploy | Items 6–7 |

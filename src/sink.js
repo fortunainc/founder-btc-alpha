@@ -18,11 +18,59 @@ import path from 'node:path';
 const CAPTURE_TABLE = 'fa_window_capture';
 const SETTLEMENT_TABLE = 'fa_settlement_grade';
 
+/**
+ * Above this many pending rows, or this many consecutive failures, the sink
+ * stops holding data in memory and spills it to disk. Without this a sustained
+ * Supabase outage would grow the queue unbounded until the container OOMs --
+ * losing everything held in memory, which is the exact outcome the requeue
+ * logic was meant to prevent.
+ */
+const MAX_PENDING_ROWS = 5_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 class BaseSink {
   constructor({ logger = console } = {}) {
     this.logger = logger;
-    this.stats = { rows_queued: 0, rows_written: 0, flushes: 0, errors: 0 };
+    this.stats = {
+      rows_queued: 0,
+      rows_written: 0,
+      flushes: 0,
+      errors: 0,
+      rows_spilled: 0,
+      spill_events: 0,
+    };
     this._queue = [];
+    this._consecutiveFailures = 0;
+    this._spillFile = null;
+  }
+
+  /**
+   * Last-resort durability: append rows to a local JSONL file and drop them
+   * from memory. Data survives for later backfill instead of being lost to an
+   * OOM kill.
+   */
+  _spill(rows, reason) {
+    try {
+      if (!this._spillFile) {
+        const dir = path.resolve(process.cwd(), 'data', 'spill');
+        fs.mkdirSync(dir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        this._spillFile = path.join(dir, `spill-${stamp}.jsonl`);
+      }
+      fs.appendFileSync(
+        this._spillFile,
+        rows.map((r) => JSON.stringify(r)).join('\n') + '\n',
+        'utf8'
+      );
+      this.stats.rows_spilled += rows.length;
+      this.stats.spill_events += 1;
+      this.logger.error?.(
+        `[sink] SPILLED ${rows.length} row(s) to ${this._spillFile} (${reason}). ` +
+          'Data is preserved on disk and must be backfilled manually.'
+      );
+    } catch (err) {
+      this.logger.error?.(`[sink] SPILL FAILED, ${rows.length} row(s) LOST: ${err.message}`);
+    }
   }
 
   /** Queue a capture row. Never writes immediately. */
@@ -43,12 +91,32 @@ class BaseSink {
       await this._write(CAPTURE_TABLE, batch);
       this.stats.rows_written += batch.length;
       this.stats.flushes += 1;
+      this._consecutiveFailures = 0;
       return { written: batch.length };
     } catch (err) {
       this.stats.errors += 1;
+      this._consecutiveFailures += 1;
+
       // Re-queue at the FRONT so ordering is preserved and data is not lost.
       this._queue.unshift(...batch);
-      this.logger.error?.(`[sink] flush failed (${batch.length} rows requeued): ${err.message}`);
+
+      // Bounded memory: once the backend is persistently unavailable, move the
+      // backlog to disk rather than growing the queue until the process dies.
+      if (
+        this._consecutiveFailures >= MAX_CONSECUTIVE_FAILURES ||
+        this._queue.length > MAX_PENDING_ROWS
+      ) {
+        const spill = this._queue.splice(0, this._queue.length);
+        this._spill(
+          spill,
+          `${this._consecutiveFailures} consecutive failures, ${spill.length} pending`
+        );
+      }
+
+      this.logger.error?.(
+        `[sink] flush failed (${batch.length} rows requeued, ` +
+          `${this._consecutiveFailures} consecutive): ${err.message}`
+      );
       return { written: 0, error: err.message };
     }
   }

@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-07-23T04:13:28.936Z",
+  "objective": "Switch worker to live Supabase writes and confirm rows land in founder_alpha.fa_window_capture",
+  "status": "BLOCKED",
+  "credentials": {
+    "supabase_url_given": "https://hahgdljmkbbykneclinf.supabase.co/rest/v1/",
+    "supabase_url_normalised": "https://hahgdljmkbbykneclinf.supabase.co",
+    "normalisation_reason": "supabase-js appends /rest/v1 itself; the given URL would have produced /rest/v1/rest/v1/",
+    "service_role_jwt": {
+      "valid": true,
+      "role": "service_role",
+      "project_ref": "hahgdljmkbbykneclinf",
+      "exp": "2036-06-13T07:10:58.000Z"
+    },
+    "credentials_verdict": "VALID - not the blocker"
+  },
+  "evidence": {
+    "rest_root_http": 200,
+    "public_schema_probe": "PGRST205 table-not-found (NOT an auth error) => PostgREST reachable and key accepted",
+    "founder_alpha_probe": "PGRST106 Invalid schema: founder_alpha",
+    "postgrest_message": "Only the following schemas are exposed: public, graphql_public"
+  },
+  "root_cause": "The founder_alpha schema exists and is verified (CTO applied migration) but is not in the PostgREST exposed-schemas list, so the REST API refuses to serve it.",
+  "remediation": {
+    "owner": "Founder or CTO (Supabase dashboard setting; cannot be changed via service-role key)",
+    "steps": [
+      "Supabase Dashboard -> Project Settings -> API",
+      "Find \"Exposed schemas\" (a.k.a. Data API schemas)",
+      "Add: founder_alpha",
+      "Save (PostgREST reloads its schema cache automatically)",
+      "Verify: node scripts/backfill.js --check   (exits 0 when fixed)",
+      "Then restart the worker WITHOUT --dry-run for live writes",
+      "Optionally: node scripts/backfill.js --dry  then without --dry to load captured JSONL"
+    ]
+  },
+  "interim_action": "Worker restarted in dry-run mode (PID recorded in logs/worker-live-pending.log). Capture continues to data/capture/*.jsonl with zero data loss; scripts/backfill.js loads it once the schema is exposed.",
+  "robustness_fix": "Sink now spills to data/spill/*.jsonl after 3 consecutive write failures or >5000 pending rows, bounding memory. Previously an outage would have grown the queue until OOM and lost everything in memory. Proven by test: 10 rows spilled, pending returned to 0, zero rows lost."
+}
