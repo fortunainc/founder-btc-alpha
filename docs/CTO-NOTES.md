@@ -31,3 +31,10 @@ Verification (runtime, CTO-executed):
 4. **Service-role key rotation:** flag accepted; it will be a CONTROLLED rotation coordinated with the founder
    (the key powers TSM prod Vercel env + crons — rotating it mid-night unattended would take down production
    grading). On the morning board.
+
+## 2026-07-23 ~16:55 UTC — Phase-1 RVR CTO FALSIFICATION: PASSED
+Independent checks against live DB (not the RVR's own fixtures):
+- 35 seals present; model set exactly {b0,b1,b2,b3}@{T-10,T-5,T-2}; every sealed_at < window_close_ts (schema CHECK + spot query).
+- Recomputed divergence + call labels for the 3 called windows from raw sealed_p vs executable up_mid: matches the verdict feed (NO/-10.7pp, NO/-4.9pp, NO/-6.6pp; threshold fee+half-spread+1pp honored).
+- Graded outcomes cross-checked vs settlement rows: 2/2 RIGHT as claimed. Spec provenance (formulas read from fa_ontology_versions) verified by diffing docstrings vs frozen rows.
+Remaining Phase-1 item: RAILWAY DEPLOY — capture+sealing currently dies with the founder's laptop. This is now the single point of failure for the Day-14 sample. Print the checklist and finish it.

@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-07-23T17:06:10.845Z",
+  "purpose": "Known data-provenance anomalies in founder_alpha.fa_window_capture. Append-only tables cannot be corrected, so anomalies are DOCUMENTED for analysis-time exclusion instead.",
+  "anomalies": [
+    {
+      "id": "double-write-2026-07-23T17:04",
+      "span_utc": {
+        "from": "2026-07-23T17:04:38Z",
+        "to": "2026-07-23T17:05:13Z"
+      },
+      "window_id": "KXBTC15M-26JUL231315-15",
+      "cause": "Operator error: a Dockerfile build-context simulation was run against PRODUCTION instead of with CAPTURE_DRY_RUN=true, so two workers wrote concurrently for ~35s.",
+      "impact": {
+        "capture_rows_observed": 17,
+        "capture_rows_expected_single_worker": 10,
+        "excess_rows": 7,
+        "row_pairs_under_2s_apart": 7,
+        "data_validity": "Rows are GENUINE book snapshots with distinct timestamps - not corrupt and not exact duplicates. The defect is DENSITY: this 50s span was sampled at roughly 2x the specified 5s cadence.",
+        "seals_affected": "NONE - 4 seals, 4 unique. UNIQUE(model_id,model_version,window_id) + ON CONFLICT DO NOTHING prevented any duplicate seal."
+      },
+      "analysis_guidance": "Exclude this span from cadence/uptime/gap statistics (v_fa_capture_health uptime_pct_of_expected is inflated for 2026-07-23). Forecast, seal and settlement analysis are UNAFFECTED.",
+      "prevention": "Any future non-production worker run MUST pass --dry-run. Only one worker may write at a time; this is why railway.json pins numReplicas=1."
+    }
+  ]
+}
