@@ -175,3 +175,33 @@ the worker issues ~17k inserts/day, not one per row.
 
 The single always-on container is the dominant cost; the worker is I/O-bound and nearly idle on
 CPU.
+
+---
+
+## 9. Founder dashboard (read-only, token-gated)
+
+The worker serves ONE extra route, `GET /dash?token=<FOUNDER_DASH_TOKEN>` — a self-contained
+dark dashboard (Pacific time, auto-refresh 10s) showing the window calls, the call scoreboard, a
+capture-alive light, and the SHADOW banner. Every other path/method returns 404, so exposing a
+public domain exposes only this one read-only page.
+
+**Fail-closed:** if `FOUNDER_DASH_TOKEN` is not set, the HTTP server does not start at all.
+
+### Enable it on Railway
+
+1. **Variables → + New Variable:** `FOUNDER_DASH_TOKEN` = the value from the terminal handoff
+   (also in the gitignored `dash-token.txt`). Save → Railway redeploys.
+2. In the redeploy log confirm: `[dash] founder dashboard listening on :<PORT> route GET /dash`.
+3. **Settings → Networking → Generate Domain.** Railway needs to know the port: when it asks,
+   use the same port the app logs (it listens on `$PORT`, which Railway sets, so "Generate
+   Domain" wires up automatically). Do **not** add a custom start command or extra ports.
+4. Your URL is `https://<the-generated-domain>/dash?token=<FOUNDER_DASH_TOKEN>`.
+
+### Notes
+
+- The page is generated **server-side** from the `service_role` connection; the browser never
+  receives any key. The token only gates access to the rendered HTML.
+- Treat the URL like a password — the token is in it. Bookmark it; don't share it.
+- To rotate: change `FOUNDER_DASH_TOKEN` in Railway (redeploys) and re-bookmark.
+- The dashboard needs migration 003's views (`v_fa_window_calls`, `v_fa_call_scoreboard`); if
+  they're absent it shows a "data warnings" banner instead of crashing.

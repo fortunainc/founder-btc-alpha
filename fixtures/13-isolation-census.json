@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-07-23T22:24:12.345Z",
-  "files_scanned": 61,
+  "captured_at": "2026-07-23T22:40:26.703Z",
+  "files_scanned": 66,
   "files_excluded_as_self_referential": [
     "scripts/isolation-check.js",
     "docs/RVR-phase0-build.md",

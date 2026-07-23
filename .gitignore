@@ -2,6 +2,11 @@
 .env
 .env.*
 !.env.example
+# Founder dashboard token, written to a local file for one-time handoff.
+dash-token.txt
+*token*.txt
+# Scratch scripts used for one-off DB checks.
+scratch-*.mjs
 # Kalshi key material — patterns are case-insensitive-safe on purpose, since
 # the downloaded filename casing varies and macOS is case-preserving.
 # Deliberately NOT anchored to an extension: editor/shell leftovers such as

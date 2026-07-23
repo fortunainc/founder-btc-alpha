@@ -35,7 +35,10 @@ ENV NODE_ENV=production \
     KALSHI_SERIES_TICKER=KXBTC15M \
     CAPTURE_DRY_RUN=false
 
-# No port is exposed: this is a worker, not a service.
+# The worker also serves ONE read-only route (GET /dash) when FOUNDER_DASH_TOKEN
+# is set, listening on $PORT (Railway injects it). Without the token no server
+# binds at all — fail-closed. EXPOSE is documentation; Railway routes by $PORT.
+EXPOSE 8787
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "src/worker.js"]

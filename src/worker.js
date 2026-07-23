@@ -29,6 +29,7 @@ import {
   sealPointFor, buildSealRows, brier, logLoss, MODEL_IDS,
 } from './forecaster.js';
 import { runPreflight } from './preflight.js';
+import { startDashboard } from './dashboard.js';
 
 loadEnv();
 
@@ -83,6 +84,21 @@ class CaptureWorker {
     );
     this.replica.start();
 
+    // Founder-only read-only dashboard. Only starts with a Supabase client
+    // (nothing to show against a dry-run sink) and a token set. It reads the
+    // same DB the worker writes; it never writes.
+    if (this.sink.mode === 'supabase' && process.env.FOUNDER_DASH_TOKEN) {
+      const port = Number(process.env.PORT || process.env.DASH_PORT || 8787);
+      this.dashboard = startDashboard({
+        getClient: () => this.sink._ensureClient(),
+        token: process.env.FOUNDER_DASH_TOKEN,
+        port,
+        logger: log,
+      });
+    } else if (!process.env.FOUNDER_DASH_TOKEN) {
+      log.info('dashboard: FOUNDER_DASH_TOKEN not set — route disabled');
+    }
+
     // Let the replica accumulate before the first snapshot so early rows carry
     // a real 60s average rather than a thin one.
     await this._discover();
@@ -101,6 +117,7 @@ class CaptureWorker {
     log.info(`shutting down (${reason})`);
     for (const t of this._timers) clearInterval(t);
     this.replica.stop();
+    if (this.dashboard) { try { this.dashboard.close(); } catch { /* already closed */ } }
     const res = await this.sink.flush();
     log.info(`final flush wrote ${res.written} row(s); ${this.sink.pending} still pending`);
     this._summary();
