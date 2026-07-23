@@ -1,0 +1,190 @@
+{
+  "captured_at": "2026-07-23T04:00:49.438Z",
+  "source": "dry-run JSONL (Supabase migration not yet applied by CTO)",
+  "totals": {
+    "capture_rows": 661,
+    "windows_seen": 3,
+    "windows_settled": 3,
+    "fully_captured_windows": 3
+  },
+  "replica_grading": {
+    "graded_windows": 3,
+    "abs_error_min": 1.84,
+    "abs_error_max": 5.75,
+    "abs_error_mean": 3.7,
+    "outcome_agreements": 3,
+    "outcome_disagreements": 0,
+    "note": "Sample of 3 is FAR too small for any accuracy claim. These are existence-proof numbers only: they show the grading pipeline works end to end, not that the replica is accurate."
+  },
+  "windows": [
+    {
+      "window_id": "KXBTC15M-26JUL222330-30",
+      "snapshots": 121,
+      "first_ts": "2026-07-23T03:27:58.913Z",
+      "last_ts": "2026-07-23T03:29:59.073Z",
+      "span_seconds": 120,
+      "phases": {
+        "normal": 1,
+        "final120": 120
+      },
+      "cadence_ms": {
+        "normal_mean": null,
+        "normal_target": 5000,
+        "final120_mean": 1001,
+        "final120_target": 1000
+      },
+      "gaps_over_30s": 0,
+      "max_gap_seconds": 1,
+      "invariants": {
+        "flag_counts": {
+          "replica_unavailable": 1,
+          "incomplete_book": 22
+        },
+        "independent_audit": {
+          "mid_sum_out_of_band": 0,
+          "mid_sum_min": 1,
+          "mid_sum_max": 1,
+          "non_monotonic_timestamps": 0,
+          "replica_null_rows": 1,
+          "thin_60s_average_rows": 55
+        }
+      },
+      "session_buckets": [
+        "asia"
+      ],
+      "macro_flagged_rows": 0,
+      "settlement": {
+        "window_id": "KXBTC15M-26JUL222330-30",
+        "event_ticker": "KXBTC15M-26JUL222330",
+        "window_open_ts": "2026-07-23T03:15:00Z",
+        "window_close_ts": "2026-07-23T03:30:00Z",
+        "settlement_value": 65617.74,
+        "reference_strike": 65601.78,
+        "outcome": "yes",
+        "replica_predicted_settlement": 65611.99,
+        "replica_predicted_outcome": "yes",
+        "replica_error": -5.75,
+        "replica_error_bps": -0.8763,
+        "replica_outcome_agrees": true,
+        "replica_60s_n": 60,
+        "session_bucket": "asia",
+        "macro_flag": false,
+        "rv_5m_at_close": 0.00005392164,
+        "graded_at": "2026-07-23T03:30:13.128Z",
+        "quality_flags": {}
+      }
+    },
+    {
+      "window_id": "KXBTC15M-26JUL222345-45",
+      "snapshots": 269,
+      "first_ts": "2026-07-23T03:30:29.069Z",
+      "last_ts": "2026-07-23T03:44:58.811Z",
+      "span_seconds": 870,
+      "phases": {
+        "normal": 150,
+        "final120": 119
+      },
+      "cadence_ms": {
+        "normal_mean": 5004,
+        "normal_target": 5000,
+        "final120_mean": 1043,
+        "final120_target": 1000
+      },
+      "gaps_over_30s": 0,
+      "max_gap_seconds": 5,
+      "invariants": {
+        "flag_counts": {
+          "incomplete_book": 41
+        },
+        "independent_audit": {
+          "mid_sum_out_of_band": 0,
+          "mid_sum_min": 1,
+          "mid_sum_max": 1,
+          "non_monotonic_timestamps": 0,
+          "replica_null_rows": 0,
+          "thin_60s_average_rows": 0
+        }
+      },
+      "session_buckets": [
+        "asia"
+      ],
+      "macro_flagged_rows": 0,
+      "settlement": {
+        "window_id": "KXBTC15M-26JUL222345-45",
+        "event_ticker": "KXBTC15M-26JUL222345",
+        "window_open_ts": "2026-07-23T03:30:00Z",
+        "window_close_ts": "2026-07-23T03:45:00Z",
+        "settlement_value": 65656.47,
+        "reference_strike": 65617.74,
+        "outcome": "yes",
+        "replica_predicted_settlement": 65654.63,
+        "replica_predicted_outcome": "yes",
+        "replica_error": -1.84,
+        "replica_error_bps": -0.2802,
+        "replica_outcome_agrees": true,
+        "replica_60s_n": 60,
+        "session_bucket": "asia",
+        "macro_flag": false,
+        "rv_5m_at_close": 0.00001871053,
+        "graded_at": "2026-07-23T03:45:02.728Z",
+        "quality_flags": {}
+      }
+    },
+    {
+      "window_id": "KXBTC15M-26JUL230000-00",
+      "snapshots": 271,
+      "first_ts": "2026-07-23T03:45:28.761Z",
+      "last_ts": "2026-07-23T03:59:59.542Z",
+      "span_seconds": 871,
+      "phases": {
+        "normal": 151,
+        "final120": 120
+      },
+      "cadence_ms": {
+        "normal_mean": 5005,
+        "normal_target": 5000,
+        "final120_mean": 1001,
+        "final120_target": 1000
+      },
+      "gaps_over_30s": 0,
+      "max_gap_seconds": 5,
+      "invariants": {
+        "flag_counts": {
+          "incomplete_book": 40
+        },
+        "independent_audit": {
+          "mid_sum_out_of_band": 0,
+          "mid_sum_min": 1,
+          "mid_sum_max": 1,
+          "non_monotonic_timestamps": 0,
+          "replica_null_rows": 0,
+          "thin_60s_average_rows": 0
+        }
+      },
+      "session_buckets": [
+        "asia"
+      ],
+      "macro_flagged_rows": 0,
+      "settlement": {
+        "window_id": "KXBTC15M-26JUL230000-00",
+        "event_ticker": "KXBTC15M-26JUL230000",
+        "window_open_ts": "2026-07-23T03:45:00Z",
+        "window_close_ts": "2026-07-23T04:00:00Z",
+        "settlement_value": 65624.32,
+        "reference_strike": 65656.47,
+        "outcome": "no",
+        "replica_predicted_settlement": 65627.84,
+        "replica_predicted_outcome": "no",
+        "replica_error": 3.52,
+        "replica_error_bps": 0.5364,
+        "replica_outcome_agrees": true,
+        "replica_60s_n": 60,
+        "session_bucket": "asia",
+        "macro_flag": false,
+        "rv_5m_at_close": 0.00001539636,
+        "graded_at": "2026-07-23T04:00:03.544Z",
+        "quality_flags": {}
+      }
+    }
+  ]
+}

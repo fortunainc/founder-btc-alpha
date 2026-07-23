@@ -113,10 +113,29 @@ export function evaluateInvariants(book, ctx = {}) {
     const sum = Number((book.up_mid + book.down_mid).toFixed(4));
     if (sum < 0.97 || sum > 1.01) flags.sum_out_of_band = sum;
   } else {
-    flags.incomplete_book = {
-      up_mid: book.up_mid,
-      down_mid: book.down_mid,
-    };
+    // A missing mid has two very different causes, and conflating them would
+    // bury real defects under normal end-of-window behaviour:
+    //
+    //  - Near expiry the outcome is effectively decided, nobody bids the
+    //    losing side, and that ladder empties completely. The surviving side
+    //    sits at an extreme (e.g. yes_bid 0.999). This is EXPECTED.
+    //  - Any other missing mid is a genuine anomaly: a torn read, an outage,
+    //    or a parser fault.
+    const liveBid = book.up_bid ?? book.down_bid;
+    const oneSidedAtExtreme =
+      liveBid !== null && liveBid !== undefined && (liveBid >= 0.97 || liveBid <= 0.03);
+
+    if (oneSidedAtExtreme) {
+      flags.one_sided_book_at_extreme = {
+        up_bid: book.up_bid,
+        down_bid: book.down_bid,
+      };
+    } else {
+      flags.incomplete_book = {
+        up_mid: book.up_mid,
+        down_mid: book.down_mid,
+      };
+    }
   }
 
   // 2. Timestamps must advance monotonically within a window.

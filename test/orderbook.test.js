@@ -144,3 +144,22 @@ test('crossed books are flagged', () => {
   );
   assert.ok(flags.crossed_up);
 });
+
+test('one-sided book at an extreme is classified as expected, not a defect', () => {
+  // Observed live in the final 120s: YES bid 0.999, NO ladder fully empty.
+  const flags = evaluateInvariants(
+    { up_mid: null, down_mid: null, up_bid: 0.999, up_ask: null, down_bid: null, down_ask: 0.001 },
+    { prevTs: 1000, ts: 6000, replicaIndex: 65000 }
+  );
+  assert.ok(flags.one_sided_book_at_extreme, 'should be flagged as expected one-sided');
+  assert.ok(!('incomplete_book' in flags), 'must NOT be flagged as a defect');
+});
+
+test('a missing mid AWAY from the extremes is still a genuine defect', () => {
+  const flags = evaluateInvariants(
+    { up_mid: null, down_mid: null, up_bid: 0.45, up_ask: null, down_bid: null, down_ask: null },
+    { prevTs: 1000, ts: 6000, replicaIndex: 65000 }
+  );
+  assert.ok(flags.incomplete_book, 'mid-range missing book is a real anomaly');
+  assert.ok(!('one_sided_book_at_extreme' in flags));
+});
