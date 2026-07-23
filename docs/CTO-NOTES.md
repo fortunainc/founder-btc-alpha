@@ -63,3 +63,23 @@ Remaining Phase-1 item: RAILWAY DEPLOY — capture+sealing currently dies with t
 
 STILL BLOCKED for the founder: Railway project connect + env paste (needs browser login I can't
 do); migration 003 (grading); repo still PUBLIC.
+
+## 2026-07-23 ~22:28 UTC — terminal agent: Railway WebSocket fix DEPLOYED + WRITING
+Root cause confirmed by local repro: node:20-slim has no global WebSocket; supabase-js
+createClient builds a Realtime client that needs one -> every sink write threw "native WebSocket
+not found" -> capture rows spilled. Kalshi WS was fine (ws lib brings its own class).
+
+Fix (commit 8a947e0, both layers): Dockerfile node:20->node:22-slim; src/ws-polyfill.js injects
+ws before any createClient (sink + backfill). backfill.js now de-dups on (window_id, ts) - the
+table has no unique constraint so a plain re-insert would double-count - and takes --spill-dir to
+recover files copied out of the container. 96/96 tests, isolation CLEAN.
+
+VERIFIED from DB: auto-deploy fired on push; 26 Railway-origin rows within ~2 min, latest 4s old,
+up+down=1.000, venues=4, no spill errors. Local worker stays STOPPED - Railway is sole writer.
+
+Two items for you:
+1. SPILL on the old container (/app/data/spill) is capture snapshots only and was WIPED by the
+   redeploy (ephemeral disk). Bounded, already visible as a gap in v_fa_capture_health. The
+   window's seals/settlements were lost outright (sink only spills capture rows - see follow-up).
+   If future recovery matters, add a persistent volume on /app/data.
+2. Recommended follow-up (NOT in this hotfix): spill seals/settlements too, not just capture.
