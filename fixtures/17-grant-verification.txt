@@ -1,0 +1,27 @@
+### 002 GRANT VERIFICATION (PostgreSQL 17, role=service_role, NOT superuser)
+
+--- privilege matrix ---
+    rolname    | schema_usage | sel | ins | upd | del 
+---------------+--------------+-----+-----+-----+-----
+ anon          | f            | f   | f   | f   | f
+ authenticated | f            | f   | f   | f   | f
+ service_role  | t            | t   | t   | f   | f
+(3 rows)
+
+--- service_role: INSERT allowed ---
+INSERT 0 1
+--- service_role: SELECT allowed ---
+ rows 
+------
+    2
+--- service_role: views readable ---
+ count 
+-------
+     1
+--- service_role: UPDATE must still be REJECTED (append-only + no grant) ---
+ERROR:  permission denied for table fa_window_capture
+--- service_role: DELETE must still be REJECTED ---
+ERROR:  permission denied for table fa_window_capture
+--- anon must STILL be locked out ---
+anon schema usage = false
+authenticated schema usage = false

@@ -361,11 +361,65 @@ Applied and independently verified: `tables_total=5`, `tables_rls_forced=5`,
 dispatch, **no `railway login` prompt was issued and no deploy was attempted**.
 `railway whoami` → `Unauthorized`.
 
-### Live Supabase writes: BLOCKED — wrong project (isolation risk)
+### Live Supabase writes: BLOCKED on migration 002 — a gap in MY migration
 
-> **Re-verified 2026-07-23 ~04:20 UTC after the CTO reported the blocker resolved. It is not
-> resolved, and the underlying cause is materially more serious than first diagnosed.**
-> Fixture: `fixtures/16-supabase-project-mismatch.json`
+> **Re-verified 2026-07-23 ~07:15 UTC.** Fixtures: `fixtures/17-grant-verification.txt`,
+> `migrations/002-grant-service-role.sql`
+>
+> **The CTO's fix worked.** The error moved from `PGRST106` (schema not exposed) to `42501`
+> (schema exposed, permission denied) — proof the Data API now serves `founder_alpha`.
+>
+> **The isolation concern is withdrawn.** Per the CTO ruling, `founder_alpha` living inside the
+> TSM project is the approved architecture: isolation is at the **schema** level (separate
+> schema, RLS forced, zero grants to `anon`/`authenticated`, append-only). Dispatch hard rule 1
+> forbids *referencing `public.tsm_*` objects and importing TSM code* — both satisfied, census
+> CLEAN (§8). It does not mandate a separate project. My inference went beyond the text.
+>
+> **The remaining blocker is a defect in migration 001, which I wrote.** 001 revoked privileges
+> from `anon`/`authenticated` but never **granted** any to `service_role`. In Postgres,
+> `BYPASSRLS` and object privileges are independent: bypassing RLS does not confer schema
+> `USAGE`. Supabase's default grants cover `public`, not a new schema. Hence:
+>
+> ```
+> 42501  permission denied for schema founder_alpha
+> ```
+>
+> **Why my own verification missed it — worth recording.** 001's suite ran as the `postgres`
+> superuser, which bypasses privilege checks entirely. It could *never* have caught a missing
+> grant. A verification that runs with more authority than production is not a verification of
+> production. 002's suite runs as a real non-superuser `service_role`.
+>
+> **The fix is written and proven.** On a clean PG17 cluster the production error was reproduced
+> exactly, then resolved:
+>
+> | Role | schema USAGE | SELECT | INSERT | UPDATE | DELETE |
+> |---|---|---|---|---|---|
+> | `service_role` | ✅ | ✅ | ✅ | ❌ | ❌ |
+> | `anon` | ❌ | ❌ | ❌ | ❌ | ❌ |
+> | `authenticated` | ❌ | ❌ | ❌ | ❌ | ❌ |
+>
+> UPDATE/DELETE are withheld deliberately — defence in depth, so append-only survives even if a
+> trigger is ever dropped. Isolation posture is unchanged.
+>
+> **Action: CTO applies `migrations/002-grant-service-role.sql`.** I cannot apply DDL through
+> PostgREST. After that, live writes need no code change — restart without `--dry-run`.
+>
+> **Sink item remains BLOCKED**, not VERIFIED: `fa_window_capture` is still empty, so there is
+> no live row count to cite as proof.
+>
+> **Data is safe.** The worker has been capturing continuously in dry-run: **9,204 capture rows
+> and 41 settlements** on disk, zero loss, ready for `scripts/backfill.js`.
+>
+> One trap avoided: `data/spill/` contained only 10 **synthetic** rows from testing the spill
+> path (`window_id: "T"`). Replaying those into an append-only table would have injected
+> permanently undeletable junk. Quarantined to `*.jsonl.quarantine`, which the backfill glob
+> ignores.
+
+### Superseded diagnosis — wrong-project isolation risk (WITHDRAWN)
+
+> Fixture `fixtures/16-supabase-project-mismatch.json` recorded a suspected project mismatch.
+> **Withdrawn:** same-project/schema-level isolation is the approved design. The `PGRST106`
+> evidence in that fixture was accurate; the isolation conclusion drawn from it was not.
 >
 > **1 — the schema is still not exposed.** Polled 10 times over 180 s, via both `supabase-js`
 > and raw PostgREST with `Accept-Profile: founder_alpha`. Every response: `PGRST106`, hint
@@ -475,8 +529,8 @@ healthy. `README-DEPLOY.md` §5 makes confirming `sink=supabase` a required post
 | 1 | **Repo is PUBLIC** (must be private) | Founder | Dispatch §A compliance |
 | 2 | Railway project does not exist | Founder | Deployment |
 | 3 | Railway CLI unauthenticated | Founder | CLI deploy |
-| 4 | **Supplied Supabase credentials point at the TSM production project** (36 `tsm_*` objects, 0 `fa_*`). `founder_alpha` still returns `PGRST106` after 180s of polling. Isolation risk — see §11. | Founder/CTO — supply the URL + key for the **isolated** Founder BTC Alpha project | Live writes + items 6–7 |
-| 4b | **Rotate the leaked `service_role` key.** It bypasses RLS across the whole TSM production project (incl. `rpc/delete_user_data`) and was pasted into a chat transcript. | Founder | Credential hygiene |
+| 4 | **`service_role` lacks GRANTs on `founder_alpha`** (`42501`). Defect in migration 001, which I wrote; fix written and proven in `migrations/002-grant-service-role.sql`. | CTO — apply 002 via SQL editor | Live writes + items 6–7 |
+| 4b | Rotate the `service_role` key (pasted into a chat transcript). CTO accepted; scheduled as a **controlled** rotation since it powers TSM prod Vercel env + crons. | Founder + CTO | Credential hygiene |
 | 5 | Rate-limit tier not exposed by API | Kalshi | Item 3 |
 | 6 | Per-user position limit needs a forbidden endpoint | Founder (read from UI) | Item 2 → VERIFIED |
 | 7 | ≥3 days continuous capture | Deploy | Items 6–7 |
