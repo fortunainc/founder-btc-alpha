@@ -1,0 +1,379 @@
+#!/usr/bin/env node
+/**
+ * Founder BTC Alpha — Phase 0 capture worker.
+ *
+ * CAPTURE ONLY. This process reads Kalshi market data and public exchange
+ * WebSockets and writes research rows. It places no orders, reads no portfolio,
+ * and produces no forecasts. The Kalshi client refuses non-GET requests at the
+ * transport layer, so that property does not depend on this file being correct.
+ *
+ * Loop:
+ *   - discover the active + next KXBTC15M window every 30s
+ *   - snapshot the book every 5s; every 1s inside the final 120s
+ *   - accumulate 1 Hz replica prints continuously (never gated on a window)
+ *   - flush at most one batched write per 5s per window
+ *   - on close, resolve settlement and grade the replica against it
+ *   - heartbeat log every 60s
+ */
+
+import { loadEnv } from './env.js';
+import { clientFromEnv } from './kalshi-client.js';
+import { ReplicaIndex, REPLICA_METHODOLOGY_VERSION } from './replica-index.js';
+import { normaliseOrderbook, evaluateInvariants } from './orderbook.js';
+import { sessionBucket, loadMacroCalendar, macroFlag } from './session.js';
+import { sinkFromEnv } from './sink.js';
+
+loadEnv();
+
+const SERIES = process.env.KALSHI_SERIES_TICKER || 'KXBTC15M';
+const DRY_RUN = process.argv.includes('--dry-run') || process.env.CAPTURE_DRY_RUN === 'true';
+const MAX_WINDOWS = Number(
+  (process.argv.find((a) => a.startsWith('--max-windows=')) || '').split('=')[1] || 0
+);
+
+const SNAPSHOT_MS = 5_000;
+const FINAL_PHASE_MS = 1_000;
+const FINAL_PHASE_WINDOW_S = 120;
+const DISCOVERY_MS = 30_000;
+const HEARTBEAT_MS = 60_000;
+
+const log = {
+  info: (m, ...a) => console.log(`${new Date().toISOString()} INFO  ${m}`, ...a),
+  warn: (m, ...a) => console.warn(`${new Date().toISOString()} WARN  ${m}`, ...a),
+  error: (m, ...a) => console.error(`${new Date().toISOString()} ERROR ${m}`, ...a),
+};
+
+class CaptureWorker {
+  constructor() {
+    this.kalshi = clientFromEnv({ env: 'prod' });
+    this.replica = new ReplicaIndex({ logger: log });
+    this.sink = sinkFromEnv({ logger: log, forceDryRun: DRY_RUN });
+    this.macro = loadMacroCalendar();
+
+    /** @type {Map<string, object>} windowId -> tracking state */
+    this.windows = new Map();
+    this.completed = [];
+    this.stopping = false;
+    this.startedAt = Date.now();
+    this.stats = { snapshots: 0, flushes: 0, settlements: 0, discovery_errors: 0, snapshot_errors: 0 };
+    this._timers = [];
+  }
+
+  async start() {
+    log.info(`=== Founder BTC Alpha capture worker ===`);
+    log.info(`series=${SERIES} sink=${this.sink.mode} replica=${REPLICA_METHODOLOGY_VERSION}`);
+    log.info(
+      `macro calendar: ${this.macro.loaded ? `${this.macro.events.length} events` : 'NOT LOADED'}`
+    );
+    if (MAX_WINDOWS) log.info(`will exit after ${MAX_WINDOWS} completed window(s)`);
+
+    this.replica.on('venue-reconnect', (v, reason, delay) =>
+      log.warn(`replica venue ${v} reconnecting in ${delay}ms (${reason})`)
+    );
+    this.replica.start();
+
+    // Let the replica accumulate before the first snapshot so early rows carry
+    // a real 60s average rather than a thin one.
+    await this._discover();
+
+    this._timers.push(setInterval(() => this._discover(), DISCOVERY_MS));
+    this._timers.push(setInterval(() => this._tick(), FINAL_PHASE_MS));
+    this._timers.push(setInterval(() => this._heartbeat(), HEARTBEAT_MS));
+
+    process.on('SIGINT', () => this.stop('SIGINT'));
+    process.on('SIGTERM', () => this.stop('SIGTERM'));
+  }
+
+  async stop(reason) {
+    if (this.stopping) return;
+    this.stopping = true;
+    log.info(`shutting down (${reason})`);
+    for (const t of this._timers) clearInterval(t);
+    this.replica.stop();
+    const res = await this.sink.flush();
+    log.info(`final flush wrote ${res.written} row(s); ${this.sink.pending} still pending`);
+    this._summary();
+    process.exit(0);
+  }
+
+  _summary() {
+    const uptime = Math.round((Date.now() - this.startedAt) / 1000);
+    log.info('=== SUMMARY ===');
+    log.info(`uptime=${uptime}s snapshots=${this.stats.snapshots} flushes=${this.stats.flushes}`);
+    log.info(`windows completed=${this.completed.length} settlements=${this.stats.settlements}`);
+    log.info(`sink: ${JSON.stringify(this.sink.stats)}`);
+    if (this.sink.mode === 'dry-run') {
+      log.info(`dry-run files: ${JSON.stringify(this.sink.files)}`);
+    }
+    for (const w of this.completed) {
+      log.info(
+        `  window ${w.window_id}: snapshots=${w.snapshots} flagged=${w.flagged} ` +
+          `settled=${w.settlement_value ?? 'pending'} replica_err=${w.replica_error ?? 'n/a'}`
+      );
+    }
+  }
+
+  /** Find the active and next windows. */
+  async _discover() {
+    try {
+      const res = await this.kalshi.getMarkets({
+        series_ticker: SERIES,
+        status: 'open',
+        limit: 20,
+      });
+      const markets = res.body?.markets || [];
+      if (!markets.length) {
+        log.warn('discovery returned no open markets');
+        return;
+      }
+
+      // Sort by close time; the soonest to close is the active window.
+      markets.sort((a, b) => new Date(a.close_time) - new Date(b.close_time));
+
+      for (const m of markets.slice(0, 2)) {
+        if (!this.windows.has(m.ticker)) {
+          this.windows.set(m.ticker, {
+            window_id: m.ticker,
+            event_ticker: m.event_ticker,
+            open_time: m.open_time,
+            close_time: m.close_time,
+            reference_strike: m.floor_strike ?? null,
+            snapshots: 0,
+            flagged: 0,
+            prevTs: null,
+            lastFlushAt: 0,
+            settled: false,
+            role: null,
+          });
+          log.info(
+            `discovered window ${m.ticker} close=${m.close_time} strike=${m.floor_strike ?? 'TBD'}`
+          );
+        } else {
+          // floor_strike is TBD until the opening minute has elapsed, so keep
+          // refreshing it rather than trusting the first read.
+          const w = this.windows.get(m.ticker);
+          if (m.floor_strike != null) w.reference_strike = m.floor_strike;
+          w.close_time = m.close_time;
+        }
+      }
+    } catch (err) {
+      this.stats.discovery_errors += 1;
+      log.error(`discovery failed: ${err.message}`);
+    }
+  }
+
+  /** 1 Hz driver: decides which windows need a snapshot this second. */
+  async _tick() {
+    if (this.stopping) return;
+    const now = Date.now();
+
+    for (const w of [...this.windows.values()]) {
+      const closeMs = new Date(w.close_time).getTime();
+      const secondsToClose = Math.round((closeMs - now) / 1000);
+
+      // Past close: settle and retire.
+      if (secondsToClose <= 0) {
+        if (!w.settled) {
+          w.settled = true;
+          this._settle(w).catch((e) => log.error(`settle ${w.window_id}: ${e.message}`));
+        }
+        continue;
+      }
+
+      const inFinalPhase = secondsToClose <= FINAL_PHASE_WINDOW_S;
+      const cadence = inFinalPhase ? FINAL_PHASE_MS : SNAPSHOT_MS;
+      if (now - (w.lastSnapshotAt || 0) < cadence - 50) continue;
+      w.lastSnapshotAt = now;
+
+      await this._snapshot(w, secondsToClose, inFinalPhase ? 'final120' : 'normal');
+    }
+
+    // Batched flush: at most one write per 5s, covering all windows.
+    if (now - (this._lastFlushAt || 0) >= SNAPSHOT_MS && this.sink.pending > 0) {
+      this._lastFlushAt = now;
+      const res = await this.sink.flush();
+      if (res.written) {
+        this.stats.flushes += 1;
+        log.info(`flushed ${res.written} row(s) (${this.sink.mode})`);
+      }
+    }
+  }
+
+  async _snapshot(w, secondsToClose, phase) {
+    try {
+      const ob = await this.kalshi.getOrderbook(w.window_id, 100);
+      if (ob.status !== 200) {
+        log.warn(`orderbook ${w.window_id} -> HTTP ${ob.status}`);
+        return;
+      }
+
+      const now = Date.now();
+      const book = normaliseOrderbook(ob.body);
+      const tick = this.replica.lastTick || {};
+      const avg60 = this.replica.trailing60s(now);
+      const vol = this.replica.volSnapshot(now);
+      const when = new Date(now);
+      const macro = macroFlag(when, this.macro);
+
+      const flags = evaluateInvariants(book, {
+        prevTs: w.prevTs,
+        ts: now,
+        replicaIndex: tick.index ?? null,
+      });
+      w.prevTs = now;
+      w.snapshots += 1;
+      this.stats.snapshots += 1;
+      if (Object.keys(flags).length) w.flagged += 1;
+
+      const { _levels, ...bookFields } = book;
+
+      this.sink.queueCapture({
+        window_id: w.window_id,
+        event_ticker: w.event_ticker,
+        ts: when.toISOString(),
+        ...bookFields,
+        replica_index: tick.index ?? null,
+        replica_60s_avg: avg60.avg,
+        replica_60s_n: avg60.n,
+        replica_venues_used: tick.venues_used ?? null,
+        replica_venue_count: tick.venue_count ?? null,
+        replica_weight_share: tick.weight_share ?? null,
+        reference_strike: w.reference_strike,
+        replica_vs_reference:
+          avg60.avg != null && w.reference_strike != null
+            ? Number((avg60.avg - w.reference_strike).toFixed(2))
+            : null,
+        rv_1m: vol.rv_1m,
+        rv_5m: vol.rv_5m,
+        rv_15m: vol.rv_15m,
+        session_bucket: sessionBucket(when),
+        macro_flag: macro.flag,
+        macro_events: macro.events.length ? macro.events : null,
+        seconds_to_close: secondsToClose,
+        capture_phase: phase,
+        quality_flags: flags,
+      });
+    } catch (err) {
+      this.stats.snapshot_errors += 1;
+      log.error(`snapshot ${w.window_id} failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * On close: read the settled market and grade the replica against the true
+   * settlement. The settlement value can lag the close, so retry briefly.
+   */
+  async _settle(w) {
+    log.info(`window ${w.window_id} closed; resolving settlement`);
+
+    // Capture the replica's closing 60s average AT close, which is the
+    // quantity Kalshi settles on. Reading it later would be a different number.
+    const closeMs = new Date(w.close_time).getTime();
+    const replicaClose = this.replica.trailing60s(closeMs);
+    const volClose = this.replica.volSnapshot(closeMs);
+
+    let market = null;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await new Promise((r) => setTimeout(r, attempt === 0 ? 3_000 : 10_000));
+      try {
+        const res = await this.kalshi.getMarket(w.window_id);
+        const m = res.body?.market;
+        if (m && (m.result || m.status === 'settled' || m.status === 'finalized')) {
+          market = m;
+          break;
+        }
+        market = m || market;
+      } catch (err) {
+        log.warn(`settlement read ${w.window_id} attempt ${attempt + 1}: ${err.message}`);
+      }
+    }
+
+    const settlementValue =
+      market?.expiration_value != null ? Number(market.expiration_value) : null;
+    const outcome = market?.result ? String(market.result).toLowerCase() : null;
+    const reference = w.reference_strike;
+
+    // What the replica would have predicted: closing 60s mean vs reference.
+    const replicaPredictedOutcome =
+      replicaClose.avg != null && reference != null
+        ? replicaClose.avg >= reference
+          ? 'yes'
+          : 'no'
+        : null;
+
+    const replicaError =
+      settlementValue != null && replicaClose.avg != null
+        ? Number((replicaClose.avg - settlementValue).toFixed(2))
+        : null;
+
+    const row = {
+      window_id: w.window_id,
+      event_ticker: w.event_ticker,
+      window_open_ts: w.open_time,
+      window_close_ts: w.close_time,
+      settlement_value: settlementValue,
+      reference_strike: reference,
+      outcome: outcome === 'yes' || outcome === 'no' ? outcome : null,
+      replica_predicted_settlement: replicaClose.avg,
+      replica_predicted_outcome: replicaPredictedOutcome,
+      replica_error: replicaError,
+      replica_error_bps:
+        replicaError != null && settlementValue
+          ? Number(((replicaError / settlementValue) * 10_000).toFixed(4))
+          : null,
+      replica_outcome_agrees:
+        outcome && replicaPredictedOutcome ? outcome === replicaPredictedOutcome : null,
+      replica_60s_n: replicaClose.n,
+      session_bucket: sessionBucket(new Date(w.close_time)),
+      macro_flag: macroFlag(new Date(w.close_time), this.macro).flag,
+      rv_5m_at_close: volClose.rv_5m,
+      graded_at: new Date().toISOString(),
+      quality_flags: settlementValue == null ? { settlement_unresolved: true } : {},
+    };
+
+    await this.sink.flush(); // ensure capture rows land before the grade
+    await this.sink.writeSettlement(row);
+    this.stats.settlements += 1;
+
+    log.info(
+      `settled ${w.window_id}: value=${settlementValue ?? 'UNRESOLVED'} outcome=${outcome ?? '?'} ` +
+        `replica=${replicaClose.avg ?? 'n/a'} err=${replicaError ?? 'n/a'} ` +
+        `agrees=${row.replica_outcome_agrees ?? 'n/a'}`
+    );
+
+    this.completed.push({ ...w, settlement_value: settlementValue, replica_error: replicaError });
+    this.windows.delete(w.window_id);
+
+    if (MAX_WINDOWS && this.completed.length >= MAX_WINDOWS) {
+      log.info(`reached --max-windows=${MAX_WINDOWS}`);
+      await this.stop('max-windows');
+    }
+  }
+
+  _heartbeat() {
+    const h = this.replica.health();
+    const venues = Object.entries(h.venues)
+      .map(([v, s]) => `${v}=${s.fresh ? 'ok' : 'STALE'}`)
+      .join(' ');
+    const active = [...this.windows.values()]
+      .map((w) => {
+        const s = Math.round((new Date(w.close_time).getTime() - Date.now()) / 1000);
+        return `${w.window_id}(T-${s}s,n=${w.snapshots})`;
+      })
+      .join(' ');
+    const tick = this.replica.lastTick || {};
+    log.info(
+      `heartbeat uptime=${Math.round((Date.now() - this.startedAt) / 1000)}s ` +
+        `index=${tick.index ?? 'n/a'} venues[${venues}] ` +
+        `windows[${active || 'none'}] snapshots=${this.stats.snapshots} ` +
+        `pending=${this.sink.pending} reconnects=${h.stats.reconnects}`
+    );
+  }
+}
+
+const worker = new CaptureWorker();
+worker.start().catch((err) => {
+  log.error(`worker failed to start: ${err.message}`);
+  console.error(err.stack);
+  process.exit(1);
+});

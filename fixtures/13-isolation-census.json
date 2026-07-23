@@ -1,0 +1,72 @@
+{
+  "captured_at": "2026-07-23T03:31:04.229Z",
+  "files_scanned": 34,
+  "files_excluded_as_self_referential": [
+    "scripts/isolation-check.js",
+    "docs/RVR-phase0-build.md",
+    "src/kalshi-client.js",
+    "fixtures/13-isolation-census.json"
+  ],
+  "dirs_skipped": [
+    "node_modules",
+    ".git",
+    "data",
+    "logs"
+  ],
+  "checks": {
+    "tsm_db_objects": {
+      "label": "TSM database objects (public.tsm_*, tsm_ prefix)",
+      "status": "CLEAN",
+      "hit_count": 0,
+      "hits": [],
+      "guard_proof_count": 0,
+      "guard_proofs": []
+    },
+    "tsm_imports": {
+      "label": "Imports from a TSM repo",
+      "status": "CLEAN",
+      "hit_count": 0,
+      "hits": [],
+      "guard_proof_count": 0,
+      "guard_proofs": []
+    },
+    "order_endpoints": {
+      "label": "Kalshi order / portfolio-mutation endpoints",
+      "status": "CLEAN",
+      "hit_count": 0,
+      "hits": [],
+      "guard_proof_count": 2,
+      "guard_proofs": [
+        {
+          "file": "fixtures/01-auth-smoke.json",
+          "lines": [
+            {
+              "line": 6,
+              "text": "\"error_message\": \"Phase 0 is read-only: refused POST /trade-api/v2/portfolio/orders\"",
+              "classification": "GUARD_PROOF"
+            }
+          ]
+        },
+        {
+          "file": "scripts/smoke-auth.js",
+          "lines": [
+            {
+              "line": 88,
+              "text": "KalshiClient.assertReadOnly('POST', '/trade-api/v2/portfolio/orders');",
+              "classification": "GUARD_PROOF"
+            }
+          ]
+        }
+      ]
+    },
+    "mutating_http": {
+      "label": "Mutating HTTP verbs issued against the Kalshi host",
+      "status": "CLEAN",
+      "hit_count": 0,
+      "hits": [],
+      "guard_proof_count": 0,
+      "guard_proofs": []
+    }
+  },
+  "overall": "ISOLATED"
+}

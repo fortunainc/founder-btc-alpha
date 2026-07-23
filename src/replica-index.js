@@ -277,6 +277,15 @@ export class TrailingWindow {
     const start = endTs - minutes * 60_000;
     const pts = this.buf.filter((p) => p.ts > start && p.ts <= endTs);
     if (pts.length < 10) return null;
+
+    // Require the sample to actually SPAN most of the requested window.
+    // Without this, a 15-minute vol computed from 5 minutes of buffer would be
+    // returned as though it were a 15-minute measurement -- silently mislabeled
+    // and not comparable across rows. Better to return null until the worker
+    // has been up long enough to answer the question honestly.
+    const spanMs = pts[pts.length - 1].ts - pts[0].ts;
+    const MIN_COVERAGE = 0.8;
+    if (spanMs < minutes * 60_000 * MIN_COVERAGE) return null;
     const rets = [];
     for (let i = 1; i < pts.length; i += 1) {
       const prev = pts[i - 1].value;
