@@ -38,3 +38,28 @@ Independent checks against live DB (not the RVR's own fixtures):
 - Recomputed divergence + call labels for the 3 called windows from raw sealed_p vs executable up_mid: matches the verdict feed (NO/-10.7pp, NO/-4.9pp, NO/-6.6pp; threshold fee+half-spread+1pp honored).
 - Graded outcomes cross-checked vs settlement rows: 2/2 RIGHT as claimed. Spec provenance (formulas read from fa_ontology_versions) verified by diffing docstrings vs frozen rows.
 Remaining Phase-1 item: RAILWAY DEPLOY — capture+sealing currently dies with the founder's laptop. This is now the single point of failure for the Day-14 sample. Print the checklist and finish it.
+
+## 2026-07-23 ~22:05 UTC — terminal agent, per CTO-RESTART-NOW.md
+1. **Local worker RESTARTED live**, single instance, sink=supabase. Confirmed 6 rows in
+   fa_window_capture within 60s of start (ts > 2026-07-23T22:00:41Z, up+down=1.000, 4 venues).
+   Now pid 46838 (restarted once more to pick up the preflight below).
+2. **Railway diagnosis — could NOT read deploy logs** (Railway CLI unauthenticated on the laptop,
+   no linked project; no dashboard access from the terminal). Diagnosed by evidence instead:
+   ZERO rows in fa_window_capture during the entire local-down window (17:25–22:00Z) => Railway
+   is not writing (not deployed, crashed, or dry-run). Reproduced the 3 likely causes locally:
+   a mangled multi-line PEM crashes with a cryptic `error:1E08010C:DECODER routines::unsupported`;
+   dry-run-left-on writes to disk silently; /rest/v1 URL suffix doubles the path.
+3. **Shipped two things to make the founder's next deploy self-diagnosing:**
+   - `src/preflight.js` — boot-time config check that NAMES the fault (e.g. "PEM newlines lost on
+     paste") and exits non-zero on a fatal, instead of dying with the raw OpenSSL error. Runs
+     BEFORE the client is constructed. 10 new tests; 94/94 total pass.
+   - `docs/RAILWAY-FIX.md` — phone-friendly decision tree keyed to the preflight output, with the
+     exact fix per failure mode.
+4. **Double-write avoided:** only the local worker is writing. RAILWAY-FIX.md step 3 tells the
+   founder to `pkill -f 'node src/worker.js'` once Railway shows `flushed … (supabase)`.
+5. **Also found + fixed during the prior stop:** a real transient Supabase outage at 16:21Z had
+   spilled 3 capture rows to disk (the OOM-guard working). Verified missing from DB, backfilled
+   exactly those 3, marked the spill file .backfilled. Zero rows lost. See fixtures/21.
+
+STILL BLOCKED for the founder: Railway project connect + env paste (needs browser login I can't
+do); migration 003 (grading); repo still PUBLIC.

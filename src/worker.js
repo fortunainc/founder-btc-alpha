@@ -28,6 +28,7 @@ import { sinkFromEnv } from './sink.js';
 import {
   sealPointFor, buildSealRows, brier, logLoss, MODEL_IDS,
 } from './forecaster.js';
+import { runPreflight } from './preflight.js';
 
 loadEnv();
 
@@ -546,7 +547,23 @@ class CaptureWorker {
   }
 }
 
-const worker = new CaptureWorker();
+// Preflight BEFORE constructing the worker: the constructor builds the Kalshi
+// client, which parses the PEM and would otherwise die with a raw OpenSSL
+// decoder error. Running the diagnosis first means Railway's logs name the
+// fault ("PEM newlines lost on paste") instead of a cryptic crash. A fatal
+// config exits non-zero so the restart policy does not loop on a dead config.
+if (!runPreflight(process.env, log)) {
+  log.error('refusing to start on a fatal config error; see docs/RAILWAY-FIX.md');
+  process.exit(1);
+}
+
+let worker;
+try {
+  worker = new CaptureWorker();
+} catch (err) {
+  log.error(`worker construction failed: ${err.message} — see docs/RAILWAY-FIX.md`);
+  process.exit(1);
+}
 worker.start().catch((err) => {
   log.error(`worker failed to start: ${err.message}`);
   console.error(err.stack);
