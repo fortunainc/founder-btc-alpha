@@ -1,7 +1,13 @@
 # Founder BTC Alpha — Phase 0 capture worker
 # Single always-on process. Capture only: no orders, no forecasts.
 
-FROM node:20-slim
+# Node 22+: ships a stable global WebSocket, which supabase-js's createClient
+# requires (it builds a Realtime client even though we never use it). On the
+# previous node:20-slim image every Supabase flush failed with "native
+# WebSocket not found" and rows spilled to disk. src/sink.js ALSO injects `ws`
+# as a belt-and-braces, so writes work even if this base image is ever
+# downgraded — but 22+ is the correct runtime.
+FROM node:22-slim
 
 # Tini gives us correct PID-1 signal handling so SIGTERM from Railway reaches
 # the worker and triggers its graceful final flush instead of killing it dead.

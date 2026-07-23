@@ -185,6 +185,14 @@ export class SupabaseSink extends BaseSink {
 
   async _ensureClient() {
     if (this._client) return this._client;
+
+    // supabase-js's createClient builds a Realtime client that needs a global
+    // WebSocket even though we never use Realtime. Node <22 has none, so on the
+    // Railway node:20 image every flush failed with "native WebSocket not
+    // found" and rows spilled to disk. Inject `ws` before createClient.
+    const { ensureWebSocket } = await import('./ws-polyfill.js');
+    await ensureWebSocket();
+
     const { createClient } = await import('@supabase/supabase-js');
     this._client = createClient(this._url, this._key, {
       auth: { persistSession: false, autoRefreshToken: false },

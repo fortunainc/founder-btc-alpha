@@ -80,6 +80,19 @@ export function preflight(env = process.env) {
       'missing or not JWT-shaped — worker will fall back to DRY-RUN');
   }
 
+  // --- Runtime WebSocket: supabase-js createClient needs it ---
+  // Node <22 has no global WebSocket; the sink injects `ws` to cover that, so
+  // this is informational. A FAIL here would mean both the runtime AND the
+  // injection are unavailable, which would break every DB write.
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  if (typeof globalThis.WebSocket === 'function') {
+    add('runtime WebSocket', 'OK', `present (Node ${process.versions.node})`);
+  } else {
+    add('runtime WebSocket', 'WARN',
+      `Node ${process.versions.node} has no global WebSocket; sink injects ws. ` +
+      (nodeMajor < 22 ? 'Base image should be Node 22+.' : ''));
+  }
+
   // --- The silent killer: dry-run left on in production ---
   const dryRun = env.CAPTURE_DRY_RUN === 'true';
   if (dryRun) {
