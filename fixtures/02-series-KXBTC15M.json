@@ -1,0 +1,54 @@
+{
+  "request": "GET /trade-api/v2/series/KXBTC15M",
+  "http_status": 200,
+  "body": {
+    "series": {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Crypto",
+      "contract_terms_url": "https://kalshi-public-docs.s3.amazonaws.com/contract_terms/CRYPTO15M.pdf",
+      "contract_url": "https://kalshi-public-docs.s3.us-east-1.amazonaws.com/regulatory/product-certifications/CRYPTO15M.pdf",
+      "fee_multiplier": 1,
+      "fee_type": "quadratic",
+      "frequency": "fifteen_min",
+      "last_updated_ts": "2026-07-01T18:05:04.527379Z",
+      "product_metadata": {
+        "important_info": {
+          "id": "CRYPTO15M-bulk-2026-04-20",
+          "markdown": "**Important information:** The price used to determine this market is based on CF Benchmarks' corresponding Real Time Index (RTI). At the last minute before expiration, 60 RTI prices are collected. The official and final value is the average of these prices.",
+          "message": "",
+          "title": ""
+        }
+      },
+      "settlement_sources": [
+        {
+          "name": "CF Benchmarks",
+          "url": "https://www.cfbenchmarks.com/"
+        }
+      ],
+      "tags": [
+        "BTC",
+        "15 min"
+      ],
+      "ticker": "KXBTC15M",
+      "title": "Bitcoin price up down"
+    }
+  },
+  "response_headers": {
+    "cache-control": "public, max-age=15",
+    "content-encoding": "br",
+    "content-security-policy": "default-src 'none';",
+    "content-type": "application/json",
+    "date": "Thu, 23 Jul 2026 03:10:21 GMT",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "vary": "Accept-Encoding",
+    "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+    "x-amz-cf-id": "bWyS5tC16QjG6WXAwdSkFvV_P1Pj7pOxjBka908GcwdzOD-i7gd0AQ==",
+    "x-amz-cf-pop": "LAX50-P1",
+    "x-cache": "Miss from cloudfront",
+    "x-content-type-options": "nosniff"
+  },
+  "captured_at": "2026-07-23T03:10:21.838Z"
+}

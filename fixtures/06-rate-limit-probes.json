@@ -1,0 +1,107 @@
+{
+  "probes": [
+    {
+      "i": 0,
+      "http_status": 200,
+      "rate_limit_headers": {},
+      "all_headers": {
+        "cache-control": "public, max-age=1",
+        "content-length": "218",
+        "content-security-policy": "default-src 'none';",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Thu, 23 Jul 2026 03:10:22 GMT",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+        "x-amz-cf-id": "voYKDbvoAT8Q9TxX5BnPdnGCdNW1tJhXRB85U-9Lv1kIbfYizRmTZA==",
+        "x-amz-cf-pop": "LAX50-P1",
+        "x-cache": "Miss from cloudfront",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "i": 1,
+      "http_status": 200,
+      "rate_limit_headers": {},
+      "all_headers": {
+        "cache-control": "public, max-age=1",
+        "content-length": "218",
+        "content-security-policy": "default-src 'none';",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Thu, 23 Jul 2026 03:10:22 GMT",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+        "x-amz-cf-id": "IVCh27SwLbfXNjP1MFornNXRyxqJmK7ypCQcts8qoY3BhTt0WqiBng==",
+        "x-amz-cf-pop": "LAX50-P1",
+        "x-cache": "Hit from cloudfront",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "i": 2,
+      "http_status": 200,
+      "rate_limit_headers": {},
+      "all_headers": {
+        "age": "0",
+        "cache-control": "public, max-age=1",
+        "content-length": "218",
+        "content-security-policy": "default-src 'none';",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Thu, 23 Jul 2026 03:10:22 GMT",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+        "x-amz-cf-id": "S2YglpeT7dhZ0YxqKLif-8t8NBTv6aY87nDo5JCo_rGKkiQ_fA0avA==",
+        "x-amz-cf-pop": "LAX50-P1",
+        "x-cache": "Hit from cloudfront",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "i": 3,
+      "http_status": 200,
+      "rate_limit_headers": {},
+      "all_headers": {
+        "age": "0",
+        "cache-control": "public, max-age=1",
+        "content-length": "218",
+        "content-security-policy": "default-src 'none';",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Thu, 23 Jul 2026 03:10:22 GMT",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+        "x-amz-cf-id": "MAUE5s9lZ_43S1u7MhAG7T8iQX_DznzXKqmbs4fCBWJqv7Q-c4qtdA==",
+        "x-amz-cf-pop": "LAX50-P1",
+        "x-cache": "Hit from cloudfront",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "i": 4,
+      "http_status": 200,
+      "rate_limit_headers": {},
+      "all_headers": {
+        "age": "0",
+        "cache-control": "public, max-age=1",
+        "content-length": "218",
+        "content-security-policy": "default-src 'none';",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Thu, 23 Jul 2026 03:10:22 GMT",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "via": "1.1 6e65633866cab274ed8ff7cd9e90659c.cloudfront.net (CloudFront)",
+        "x-amz-cf-id": "qOrij7MauN6swL57pYydjT_vOcr1BYs4M0UeyXhM9SZBxHaEDv00yQ==",
+        "x-amz-cf-pop": "LAX50-P1",
+        "x-cache": "Hit from cloudfront",
+        "x-content-type-options": "nosniff"
+      }
+    }
+  ],
+  "summary": {
+    "status": "BLOCKED",
+    "rate_limit_headers_present": false,
+    "probes_sent": 5,
+    "observed_headers": null,
+    "reason": "Kalshi returned NO rate-limit headers on any probe. The tier is therefore not determinable from the API surface; it is published in docs per access tier and is an account attribute. Client enforces a conservative self-imposed floor instead.",
+    "client_self_imposed_floor_ms": 110,
+    "client_self_imposed_rps": 9
+  },
+  "captured_at": "2026-07-23T03:10:22.704Z"
+}

@@ -1,0 +1,14 @@
+{
+  "series_ticker": "KXBTC15M",
+  "taker_multiplier": 0.07,
+  "fee_type": "quadratic",
+  "api_fee_multiplier": 1,
+  "quadratic_base_rate": 0.07,
+  "maker_fee_applies": false,
+  "maker_per_contract": 0,
+  "rounding": "ceil_to_cent",
+  "source": "Kalshi GET /series/KXBTC15M fixture 02-series-KXBTC15M.json",
+  "verified": true,
+  "verified_at": "2026-07-23T03:10:23.847Z",
+  "maker_fee_confidence": "PARTIAL — absence of an API field, not a positive confirmation"
+}

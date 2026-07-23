@@ -1,0 +1,116 @@
+{
+  "captured_at": "2026-07-23T03:07:55.054Z",
+  "read_only_guard_proof": {
+    "guard_active": true,
+    "error_name": "ReadOnlyViolation",
+    "error_message": "Phase 0 is read-only: refused POST /trade-api/v2/portfolio/orders"
+  },
+  "environments": {
+    "demo": {
+      "skipped": true,
+      "reason": "no demo credentials provided"
+    },
+    "prod": {
+      "environment": "prod",
+      "captured_at": "2026-07-23T03:07:55.503Z",
+      "base_url": "https://api.elections.kalshi.com",
+      "key_id_present": true,
+      "authenticated": true,
+      "results": {
+        "exchange_status": {
+          "request": {
+            "method": "GET",
+            "path": "/trade-api/v2/exchange/status"
+          },
+          "http_status": 200,
+          "body": {
+            "exchange_active": true,
+            "exchange_index_statuses": [
+              {
+                "exchange_active": true,
+                "exchange_index": 0,
+                "intra_exchange_transfers_active": true,
+                "trading_active": true
+              }
+            ],
+            "intra_exchange_transfers_active": true,
+            "trading_active": true
+          },
+          "rate_limit_headers": {},
+          "response_headers": {
+            "cache-control": "public, max-age=1",
+            "content-length": "218",
+            "content-security-policy": "default-src 'none';",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Thu, 23 Jul 2026 03:07:55 GMT",
+            "strict-transport-security": "max-age=31536000; includeSubDomains",
+            "via": "1.1 45c4483283158df91c6aa04a2f4efc0a.cloudfront.net (CloudFront)",
+            "x-amz-cf-id": "_cTJRF8CRcHiW9UULO0GbYuHc-fIPOkDBDYHB8n3YZ2XMaSkJb8IsQ==",
+            "x-amz-cf-pop": "LAX50-P1",
+            "x-cache": "Miss from cloudfront",
+            "x-content-type-options": "nosniff"
+          }
+        },
+        "series": {
+          "request": {
+            "method": "GET",
+            "path": "/trade-api/v2/series/KXBTC15M"
+          },
+          "http_status": 200,
+          "body": {
+            "series": {
+              "additional_prohibitions": [
+                "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+                "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+              ],
+              "category": "Crypto",
+              "contract_terms_url": "https://kalshi-public-docs.s3.amazonaws.com/contract_terms/CRYPTO15M.pdf",
+              "contract_url": "https://kalshi-public-docs.s3.us-east-1.amazonaws.com/regulatory/product-certifications/CRYPTO15M.pdf",
+              "fee_multiplier": 1,
+              "fee_type": "quadratic",
+              "frequency": "fifteen_min",
+              "last_updated_ts": "2026-07-01T18:05:04.527379Z",
+              "product_metadata": {
+                "important_info": {
+                  "id": "CRYPTO15M-bulk-2026-04-20",
+                  "markdown": "**Important information:** The price used to determine this market is based on CF Benchmarks' corresponding Real Time Index (RTI). At the last minute before expiration, 60 RTI prices are collected. The official and final value is the average of these prices.",
+                  "message": "",
+                  "title": ""
+                }
+              },
+              "settlement_sources": [
+                {
+                  "name": "CF Benchmarks",
+                  "url": "https://www.cfbenchmarks.com/"
+                }
+              ],
+              "tags": [
+                "BTC",
+                "15 min"
+              ],
+              "ticker": "KXBTC15M",
+              "title": "Bitcoin price up down"
+            }
+          },
+          "rate_limit_headers": {},
+          "response_headers": {
+            "age": "11",
+            "cache-control": "public, max-age=15",
+            "content-encoding": "br",
+            "content-security-policy": "default-src 'none';",
+            "content-type": "application/json",
+            "date": "Thu, 23 Jul 2026 03:07:44 GMT",
+            "strict-transport-security": "max-age=31536000; includeSubDomains",
+            "vary": "Accept-Encoding",
+            "via": "1.1 45c4483283158df91c6aa04a2f4efc0a.cloudfront.net (CloudFront)",
+            "x-amz-cf-id": "uZjGvIFF6IxoJpp9lGpwR7yxh1o5rtbirdlJmVtF7zjwcx_9bxcx5g==",
+            "x-amz-cf-pop": "LAX50-P1",
+            "x-cache": "Hit from cloudfront",
+            "x-content-type-options": "nosniff"
+          }
+        }
+      }
+    }
+  },
+  "status": "VERIFIED"
+}

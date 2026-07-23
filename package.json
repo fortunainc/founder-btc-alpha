@@ -1,0 +1,22 @@
+{
+  "name": "founder-btc-alpha",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 0 capture-only research system for Kalshi KXBTC15M markets. No models, no forecasts, no order placement.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "verify:mechanics": "node scripts/verify-mechanics.js",
+    "smoke:auth": "node scripts/smoke-auth.js",
+    "worker": "node src/worker.js",
+    "worker:dryrun": "node src/worker.js --dry-run",
+    "test": "node --test test/",
+    "isolation:check": "node scripts/isolation-check.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "ws": "^8.18.0"
+  }
+}

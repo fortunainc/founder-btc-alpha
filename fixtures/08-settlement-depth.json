@@ -1,0 +1,16 @@
+{
+  "summary": {
+    "status": "VERIFIED",
+    "retrievable_via_api": true,
+    "endpoint": "GET /trade-api/v2/markets?series_ticker=KXBTC15M&status=settled",
+    "settlement_result_field_present": true,
+    "markets_seen": 1600,
+    "pages_walked": 8,
+    "paging_truncated_at_max_pages": true,
+    "oldest_close_time_seen": "2026-07-06T06:45:00Z",
+    "newest_close_time_seen": "2026-07-23T03:00:00Z",
+    "lookback_days_observed": 16.84,
+    "note": "Probe capped at 8 pages to stay cheap; true history extends further than the window reported here. This is a floor, not the limit."
+  },
+  "captured_at": "2026-07-23T03:10:23.846Z"
+}

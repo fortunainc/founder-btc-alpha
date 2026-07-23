@@ -1,0 +1,121 @@
+{
+  "captured_at": "2026-07-23T03:10:23.847Z",
+  "series": "KXBTC15M",
+  "total_api_requests": 17,
+  "findings": {
+    "item1_fees": {
+      "status": "VERIFIED",
+      "fee_type_from_api": "quadratic",
+      "fee_multiplier_from_api": 1,
+      "quadratic_base_rate": 0.07,
+      "effective_taker_multiplier": 0.07,
+      "formula": "fee = ceil_to_cent(effective_taker_multiplier * C * P * (1-P))",
+      "maker_fee_exposed_by_api": false,
+      "maker_fee_note": "The series object exposes no maker-fee field. Kalshi charges maker fees only on an explicitly listed subset of series; KXBTC15M is not marked as such here. Treated as maker_fee_applies=false, flagged PARTIAL: not positively confirmed by an API field.",
+      "caveat": "fee_multiplier=1 is a RELATIVE multiplier on the 0.07 base rate, not an absolute 1.0 rate."
+    },
+    "item5_rules": {
+      "status": "VERIFIED",
+      "settlement_sources": [
+        {
+          "name": "CF Benchmarks",
+          "url": "https://www.cfbenchmarks.com/"
+        }
+      ],
+      "contract_terms_url": "https://kalshi-public-docs.s3.amazonaws.com/contract_terms/CRYPTO15M.pdf",
+      "important_info_markdown": "**Important information:** The price used to determine this market is based on CF Benchmarks' corresponding Real Time Index (RTI). At the last minute before expiration, 60 RTI prices are collected. The official and final value is the average of these prices.",
+      "settlement_source_parsed": "CF Benchmarks Real Time Index (RTI)",
+      "averaging_window_parsed": "Final minute before expiration; 60 RTI prices collected; settlement = arithmetic mean of those 60 prices.",
+      "frequency": "fifteen_min",
+      "rules_primary": "If the simple average of the sixty seconds of CF Benchmarks' BRTI before 11:15 PM EDT on Jul 22, 2026 is at least the simple average of the sixty seconds of CF Benchmarks' BRTI before 11:00 PM EDT on July 22, 2026, then the market resolves to Yes.",
+      "rules_secondary": "Not all cryptocurrency price data is the same. While checking a source like Google or Coinbase may help guide your decision, the price used to determine this market is based on CF Benchmarks' corresponding Real Time Index (RTI). At the last minute before expiration, 60 RTI prices are collected. The official and final value is the average of these prices, rounded to the nearest 2 decimal places.",
+      "settlement_timer_seconds": 1,
+      "index_name_parsed": "CF Benchmarks BRTI (Bitcoin Real Time Index)",
+      "settlement_mechanic_parsed": {
+        "reference_value": "simple average of the 60 BRTI prints in the minute BEFORE window OPEN",
+        "settlement_value": "simple average of the 60 BRTI prints in the minute BEFORE window CLOSE",
+        "resolution": "YES if settlement_value >= reference_value",
+        "rounding": "final value rounded to 2 decimal places",
+        "note": "The reference is NOT a static strike chosen in advance — it is itself a 60s average, exposed as floor_strike once the open minute has elapsed. Any replica must therefore reproduce BOTH averages, not just the closing one.",
+        "floor_strike_observed": 65776.62,
+        "strike_type": "greater_or_equal"
+      },
+      "price_level_structure": "tapered_deci_cent"
+    },
+    "item2_limits": {
+      "status": "PARTIAL",
+      "sample_ticker": "KXBTC15M-26JUL222315-15",
+      "risk_limit_cents": null,
+      "notional_value_dollars": "1.0000",
+      "price_level_structure": "tapered_deci_cent",
+      "tick_note": "Prices are NOT whole cents: the book quotes to 4dp (deci-cent) and the tick tapers by price level. Depth-within-2c logic must not assume 1c increments.",
+      "fields_present": [
+        "can_close_early",
+        "close_time",
+        "created_time",
+        "custom_strike",
+        "event_ticker",
+        "expected_expiration_time",
+        "expiration_time",
+        "expiration_value",
+        "floor_strike",
+        "last_price_dollars",
+        "latest_expiration_time",
+        "liquidity_dollars",
+        "market_type",
+        "no_ask_dollars",
+        "no_bid_dollars",
+        "no_sub_title",
+        "notional_value_dollars",
+        "occurrence_datetime",
+        "open_interest_fp",
+        "open_time",
+        "previous_price_dollars",
+        "previous_yes_ask_dollars",
+        "previous_yes_bid_dollars",
+        "price_level_structure",
+        "price_ranges",
+        "result",
+        "rules_primary",
+        "rules_secondary",
+        "settlement_timer_seconds",
+        "status",
+        "strike_type",
+        "ticker",
+        "title",
+        "updated_time",
+        "volume_24h_fp",
+        "volume_fp",
+        "yes_ask_dollars",
+        "yes_ask_size_fp",
+        "yes_bid_dollars",
+        "yes_bid_size_fp",
+        "yes_sub_title"
+      ],
+      "per_user_position_limit_exposed": false,
+      "note": "Market objects expose risk_limit_cents / notional_value / tick_size. A PER-USER position limit is an account-level attribute not returned by any read-only market endpoint; reading it would require a portfolio endpoint, which Phase 0 forbids. Recorded PARTIAL by design, not by failure."
+    },
+    "item3_rate_limits": {
+      "status": "BLOCKED",
+      "rate_limit_headers_present": false,
+      "probes_sent": 5,
+      "observed_headers": null,
+      "reason": "Kalshi returned NO rate-limit headers on any probe. The tier is therefore not determinable from the API surface; it is published in docs per access tier and is an account attribute. Client enforces a conservative self-imposed floor instead.",
+      "client_self_imposed_floor_ms": 110,
+      "client_self_imposed_rps": 9
+    },
+    "item4_settlements": {
+      "status": "VERIFIED",
+      "retrievable_via_api": true,
+      "endpoint": "GET /trade-api/v2/markets?series_ticker=KXBTC15M&status=settled",
+      "settlement_result_field_present": true,
+      "markets_seen": 1600,
+      "pages_walked": 8,
+      "paging_truncated_at_max_pages": true,
+      "oldest_close_time_seen": "2026-07-06T06:45:00Z",
+      "newest_close_time_seen": "2026-07-23T03:00:00Z",
+      "lookback_days_observed": 16.84,
+      "note": "Probe capped at 8 pages to stay cheap; true history extends further than the window reported here. This is a floor, not the limit."
+    }
+  }
+}

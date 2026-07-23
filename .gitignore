@@ -2,11 +2,22 @@
 .env
 .env.*
 !.env.example
-kalshi-key.txt
+# Kalshi key material — patterns are case-insensitive-safe on purpose, since
+# the downloaded filename casing varies and macOS is case-preserving.
+# Deliberately NOT anchored to an extension: editor/shell leftovers such as
+# "kalshi-key.txt.save" and "kalshi-key.txt-----BEGIN" were observed in this
+# working tree and each held a full private key.
+*[Kk][Aa][Ll][Ss][Hh][Ii]*[Kk][Ee][Yy]*
 *.pem
 *.key
 *_rsa
 id_*
+# Editor backups / partial writes, which routinely capture secret files.
+*.save
+*.swp
+*.bak
+*~
+*-----BEGIN*
 
 # --- deps ---
 node_modules/
