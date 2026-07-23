@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 /**
- * Founder BTC Alpha — Phase 0 capture worker.
+ * Founder BTC Alpha — Phase 1 capture + forecast worker.
  *
- * CAPTURE ONLY. This process reads Kalshi market data and public exchange
- * WebSockets and writes research rows. It places no orders, reads no portfolio,
- * and produces no forecasts. The Kalshi client refuses non-GET requests at the
- * transport layer, so that property does not depend on this file being correct.
+ * CAPTURE, FORECAST AND GRADE ONLY. This process reads Kalshi market data and
+ * public exchange WebSockets, writes research rows, and seals forecasts from
+ * the frozen models in fa_ontology_versions. It places NO orders, commits NO
+ * capital, and reads NO portfolio endpoint. The Kalshi client refuses non-GET
+ * requests at the transport layer, so that property does not depend on this
+ * file being correct.
  *
  * Loop:
  *   - discover the active + next KXBTC15M window every 30s
  *   - snapshot the book every 5s; every 1s inside the final 120s
  *   - accumulate 1 Hz replica prints continuously (never gated on a window)
+ *   - seal all four frozen models at T-10 / T-5 / T-2 (+/-5s)
  *   - flush at most one batched write per 5s per window
- *   - on close, resolve settlement and grade the replica against it
+ *   - on close, resolve settlement, grade the replica, and score every seal
  *   - heartbeat log every 60s
  */
 
@@ -22,6 +25,9 @@ import { ReplicaIndex, REPLICA_METHODOLOGY_VERSION } from './replica-index.js';
 import { normaliseOrderbook, evaluateInvariants } from './orderbook.js';
 import { sessionBucket, loadMacroCalendar, macroFlag } from './session.js';
 import { sinkFromEnv } from './sink.js';
+import {
+  sealPointFor, buildSealRows, brier, logLoss, MODEL_IDS,
+} from './forecaster.js';
 
 loadEnv();
 
@@ -55,7 +61,11 @@ class CaptureWorker {
     this.completed = [];
     this.stopping = false;
     this.startedAt = Date.now();
-    this.stats = { snapshots: 0, flushes: 0, settlements: 0, discovery_errors: 0, snapshot_errors: 0 };
+    this.stats = {
+      snapshots: 0, flushes: 0, settlements: 0,
+      discovery_errors: 0, snapshot_errors: 0,
+      seals_graded: 0,
+    };
     this._timers = [];
   }
 
@@ -107,7 +117,7 @@ class CaptureWorker {
     }
     for (const w of this.completed) {
       log.info(
-        `  window ${w.window_id}: snapshots=${w.snapshots} flagged=${w.flagged} ` +
+        `  window ${w.window_id}: snapshots=${w.snapshots} seals=${w.sealsWritten} flagged=${w.flagged} ` +
           `settled=${w.settlement_value ?? 'pending'} replica_err=${w.replica_error ?? 'n/a'}`
       );
     }
@@ -144,6 +154,9 @@ class CaptureWorker {
             lastFlushAt: 0,
             settled: false,
             role: null,
+            sealsDone: new Set(),   // seal-point labels already attempted
+            sealsWritten: 0,
+            sealPasses: [],
           });
           log.info(
             `discovered window ${m.ticker} close=${m.close_time} strike=${m.floor_strike ?? 'TBD'}`
@@ -178,6 +191,15 @@ class CaptureWorker {
           this._settle(w).catch((e) => log.error(`settle ${w.window_id}: ${e.message}`));
         }
         continue;
+      }
+
+      // ---- Phase 1: sealed forecasts at T-10 / T-5 / T-2 (+/-5s) ----
+      const sp = sealPointFor(secondsToClose);
+      if (sp && !w.sealsDone.has(sp.label)) {
+        w.sealsDone.add(sp.label); // mark BEFORE awaiting: one attempt per point
+        this._seal(w, sp, secondsToClose).catch((e) =>
+          log.error(`seal ${w.window_id} ${sp.label}: ${e.message}`)
+        );
       }
 
       const inFinalPhase = secondsToClose <= FINAL_PHASE_WINDOW_S;
@@ -335,6 +357,11 @@ class CaptureWorker {
     await this.sink.writeSettlement(row);
     this.stats.settlements += 1;
 
+    // Phase 1: score every sealed forecast for this window.
+    if (row.outcome) {
+      this.stats.seals_graded += await this._gradeSeals(w, row.outcome);
+    }
+
     log.info(
       `settled ${w.window_id}: value=${settlementValue ?? 'UNRESOLVED'} outcome=${outcome ?? '?'} ` +
         `replica=${replicaClose.avg ?? 'n/a'} err=${replicaError ?? 'n/a'} ` +
@@ -350,6 +377,154 @@ class CaptureWorker {
     }
   }
 
+  /**
+   * Seal all four frozen models at one seal point.
+   *
+   * A model that cannot compute from real inputs PASSES: no row is written.
+   * The absence of a seal is the honest record; sealed_p is NOT NULL in the
+   * schema, so there is no way to record a fabricated or null probability.
+   *
+   * Seals are written immediately rather than batched: the sealed_at < close
+   * CHECK is the whole integrity guarantee, and a batched seal could drift
+   * past close and be rejected. A late seal is dropped, never backdated.
+   */
+  async _seal(w, sealPoint, secondsToClose) {
+    const sealedAt = new Date();
+    const closeMs = new Date(w.close_time).getTime();
+    if (sealedAt.getTime() >= closeMs) {
+      log.warn(`seal ${w.window_id} ${sealPoint.label} DROPPED: would postdate close`);
+      return;
+    }
+
+    let book;
+    try {
+      const ob = await this.kalshi.getOrderbook(w.window_id, 100);
+      if (ob.status !== 200) {
+        log.warn(`seal ${w.window_id} ${sealPoint.label}: orderbook HTTP ${ob.status}`);
+        return;
+      }
+      book = normaliseOrderbook(ob.body);
+    } catch (err) {
+      log.error(`seal ${w.window_id} ${sealPoint.label}: book fetch failed: ${err.message}`);
+      return;
+    }
+
+    const now = Date.now();
+    const tick = this.replica.lastTick || {};
+    const vol = this.replica.volSnapshot(now);
+    const ret5m = this._replicaReturn(5 * 60_000, now);
+
+    const { rows, passes } = buildSealRows({
+      windowId: w.window_id,
+      windowCloseTs: new Date(closeMs).toISOString(),
+      sealedAt: sealedAt.toISOString(),
+      sealPoint,
+      secondsToClose,
+      book,
+      replica: tick.index ?? null,
+      strike: w.reference_strike,
+      sigma: vol.rv_15m,
+      ret5m,
+    });
+
+    // Re-check the clock AFTER the network round trip.
+    if (Date.now() >= closeMs) {
+      log.warn(`seal ${w.window_id} ${sealPoint.label} DROPPED: close passed during fetch`);
+      return;
+    }
+
+    const res = await this.sink.writeSeals(rows);
+    w.sealsWritten += res.written || 0;
+    if (passes.length) w.sealPasses.push({ seal_point: sealPoint.label, passes });
+
+    log.info(
+      `SEAL ${w.window_id} ${sealPoint.label} T-${secondsToClose}s: ` +
+        `${res.written || 0}/4 sealed` +
+        (passes.length ? ` | PASS: ${passes.map((p) => p.model_id.split('-')[0] + '=' + p.reason).join(' ')}` : '') +
+        (rows.length ? ` | p=[${rows.map((r) => r.model_id.split('-')[0] + ':' + r.sealed_p.toFixed(3)).join(' ')}]` : '')
+    );
+  }
+
+  /** Signed replica return over the trailing `ms`, or null if uncovered. */
+  _replicaReturn(ms, endTs) {
+    const buf = this.replica.window.buf;
+    if (!buf.length) return null;
+    const start = endTs - ms;
+    const recent = buf.filter((p) => p.ts >= start && p.ts <= endTs);
+    if (recent.length < 10) return null;
+    const first = recent[0].value;
+    const last = recent[recent.length - 1].value;
+    if (!(first > 0) || !(last > 0)) return null;
+    // Require the sample to actually span the requested horizon.
+    if (recent[recent.length - 1].ts - recent[0].ts < ms * 0.8) return null;
+    return Math.log(last / first);
+  }
+
+  /**
+   * Grade every seal of a settled window: Brier, log loss, and the delta
+   * against B0 at the SAME seal point (stats-rules v1 primary metric).
+   */
+  async _gradeSeals(w, outcome) {
+    if (outcome !== 'yes' && outcome !== 'no') {
+      log.warn(`grade ${w.window_id}: outcome '${outcome}' not gradeable`);
+      return 0;
+    }
+    if (this.sink.mode !== 'supabase') {
+      log.info(`grade ${w.window_id}: skipped (dry-run sink has no seal ids)`);
+      return 0;
+    }
+
+    let seals;
+    try {
+      const client = await this.sink._ensureClient();
+      const { data, error } = await client
+        .from('fa_forecast_seal')
+        .select('id,model_id,model_version,sealed_p,executable_prices')
+        .eq('window_id', w.window_id);
+      if (error) throw new Error(error.message);
+      seals = data || [];
+    } catch (err) {
+      log.error(`grade ${w.window_id}: seal fetch failed: ${err.message}`);
+      return 0;
+    }
+    if (!seals.length) return 0;
+
+    const yes = outcome === 'yes';
+
+    // B0's Brier per seal point is the baseline every other model is scored against.
+    const b0Brier = {};
+    for (const s of seals) {
+      if (s.model_id === MODEL_IDS.B0) {
+        b0Brier[s.model_version] = brier(Number(s.sealed_p), yes);
+      }
+    }
+
+    const rows = [];
+    for (const s of seals) {
+      const p = Number(s.sealed_p);
+      const b = brier(p, yes);
+      const base = b0Brier[s.model_version];
+      rows.push({
+        seal_id: s.id,
+        window_id: w.window_id,
+        model_id: s.model_id,
+        model_version: s.model_version,
+        seal_point: String(s.model_version).split('@')[1] || null,
+        outcome,
+        sealed_p: p,
+        market_p_at_seal: s.executable_prices?.up_mid ?? null,
+        brier: b,
+        log_loss: logLoss(p, yes),
+        // Signed: negative means the model beat the market baseline.
+        brier_vs_b0: Number.isFinite(base) && Number.isFinite(b) ? b - base : null,
+      });
+    }
+
+    const res = await this.sink.writeGrades(rows);
+    log.info(`GRADED ${w.window_id}: ${res.written || 0} seal(s) scored vs outcome=${outcome}`);
+    return res.written || 0;
+  }
+
   _heartbeat() {
     const h = this.replica.health();
     const venues = Object.entries(h.venues)
@@ -358,7 +533,7 @@ class CaptureWorker {
     const active = [...this.windows.values()]
       .map((w) => {
         const s = Math.round((new Date(w.close_time).getTime() - Date.now()) / 1000);
-        return `${w.window_id}(T-${s}s,n=${w.snapshots})`;
+        return `${w.window_id}(T-${s}s,n=${w.snapshots},seals=${w.sealsWritten})`;
       })
       .join(' ');
     const tick = this.replica.lastTick || {};

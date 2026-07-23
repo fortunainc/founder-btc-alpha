@@ -1,11 +1,12 @@
 {
-  "captured_at": "2026-07-23T04:05:08.520Z",
-  "files_scanned": 42,
+  "captured_at": "2026-07-23T15:53:13.779Z",
+  "files_scanned": 50,
   "files_excluded_as_self_referential": [
     "scripts/isolation-check.js",
     "docs/RVR-phase0-build.md",
     "src/kalshi-client.js",
-    "fixtures/13-isolation-census.json"
+    "fixtures/13-isolation-census.json",
+    "fixtures/16-supabase-project-mismatch.json"
   ],
   "dirs_skipped": [
     "node_modules",

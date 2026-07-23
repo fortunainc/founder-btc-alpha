@@ -1,0 +1,33 @@
+### PHASE 1 GRADER + VERDICT FEED — real production seals, local PG17 (migration 003 not yet in prod)
+
+--- v_fa_window_calls (4-state, founder addendum) ---
+        window_id        | seal_point | market_p | consensus_p | divergence | actionable_threshold | call | outcome | call_correct 
+-------------------------+------------+----------+-------------+------------+----------------------+------+---------+--------------
+ KXBTC15M-26JUL231200-00 | T-10       |   0.7650 |             |            |               0.0350 | THIN | yes     | 
+ KXBTC15M-26JUL231200-00 | T-2        |   0.9835 |             |            |               0.0235 | THIN | yes     | 
+ KXBTC15M-26JUL231200-00 | T-5        |   0.8450 |             |            |               0.0250 | THIN | yes     | 
+ KXBTC15M-26JUL231215-15 | T-10       |   0.1350 |      0.0633 |    -0.0717 |               0.0250 | NO   | no      | t
+ KXBTC15M-26JUL231215-15 | T-2        |   0.0100 |      0.0100 |     0.0000 |               0.0205 | FAIR | no      | t
+ KXBTC15M-26JUL231215-15 | T-5        |   0.0165 |      0.0104 |    -0.0061 |               0.0205 | FAIR | no      | t
+ KXBTC15M-26JUL231230-30 | T-10       |   0.1150 |      0.0400 |    -0.0750 |               0.0250 | NO   | no      | t
+ KXBTC15M-26JUL231230-30 | T-2        |   0.0100 |      0.0100 |     0.0000 |               0.0205 | FAIR | no      | t
+ KXBTC15M-26JUL231230-30 | T-5        |   0.1550 |      0.2679 |     0.1129 |               0.0250 | YES  | no      | f
+(9 rows)
+
+--- v_fa_call_scoreboard (per-state counts + accuracy) ---
+ seal_point | call | n_total | n_graded | n_correct | accuracy | mean_abs_divergence 
+------------+------+---------+----------+-----------+----------+---------------------
+ T-10       | NO   |       2 |        2 |         2 |   1.0000 |              0.0734
+ T-10       | THIN |       1 |        1 |         0 |          |                    
+ T-2        | FAIR |       2 |        2 |         2 |   1.0000 |              0.0000
+ T-2        | THIN |       1 |        1 |         0 |          |                    
+ T-5        | FAIR |       1 |        1 |         1 |   1.0000 |              0.0061
+ T-5        | THIN |       1 |        1 |         0 |          |                    
+ T-5        | YES  |       1 |        1 |         0 |   0.0000 |              0.1129
+(7 rows)
+
+--- FAIR interpretation string ---
+FAIR: accuracy here = how often a FAIR window settled with the market's favourite; it validates the MARKET's calibration, not ours
+NO: accuracy here = how often our actionable call was right
+THIN: no call made; correctness undefined by design
+YES: accuracy here = how often our actionable call was right

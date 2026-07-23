@@ -1,7 +1,27 @@
-# Deploying the Phase 0 capture worker (Railway)
+# Deploying the Phase 1 capture + forecast worker (Railway)
 
 Single always-on worker. No HTTP port, no health-check endpoint — Railway keeps it alive via
 the restart policy in `railway.json`.
+
+**Phase 1 adds sealed forecasting.** The same process now also seals all four frozen models
+(B0/B1/B2/B3) at T-10 / T-5 / T-2 per window and grades them on settlement. Still no orders,
+no capital, no portfolio reads.
+
+## ⚠ Cold-start behaviour you must expect
+
+B1/B2/B3 need a rolling 15-minute realized-vol figure, and B2 additionally needs a 5-minute
+replica return. After ANY restart the replica buffer is empty, so for roughly the first
+**12 minutes** those three models will correctly **PASS** and only B0 will seal:
+
+```
+SEAL … T-10 T-605s: 1/4 sealed | PASS: b1=realized_vol_unavailable
+       b2=five_min_return_unavailable b3=realized_vol_unavailable | p=[b0:0.765]
+```
+
+**This is correct, not a fault.** A model that cannot compute from real inputs must decline;
+a guessed input would be fabrication. Because Railway restarts on deploy and on crash, expect
+a short B0-only period after each one. Judge health by whether `n/4 sealed` returns to 4/4
+within ~15 minutes, not by the first seal after boot.
 
 **Nothing here has been deployed.** Deployment is BLOCKED pending founder action; see §6.
 
@@ -13,7 +33,9 @@ the restart policy in `railway.json`.
 |---|---|
 | Railway project exists | **BLOCKED — founder must create** |
 | Railway CLI authenticated | **BLOCKED — `railway whoami` returns "Unauthorized"** |
-| Supabase migration applied | **BLOCKED — CTO applies `migrations/001-founder-alpha-v1.sql`** |
+| Supabase migration 001 applied | ✅ APPLIED + VERIFIED (CTO) |
+| Supabase migration 002 (grants) applied | ✅ APPLIED + VERIFIED (CTO) |
+| Supabase migration 003 (forecast grading) applied | **BLOCKED — CTO applies `migrations/003-forecast-grade.sql`** |
 | GitHub repo private | **FAILED — repo is currently PUBLIC, see §7** |
 
 Per the dispatch, no `railway login` prompt was issued and no deploy was attempted.
@@ -120,7 +142,7 @@ violations per day.
 |---|---|---|---|
 | 1 | Railway project does not exist | Founder | Everything in §4 |
 | 2 | Railway CLI unauthenticated (`railway whoami` → Unauthorized) | Founder | CLI-based deploy. Per dispatch, no login prompt was issued. |
-| 3 | Supabase migration not applied | CTO | Worker runs but falls back to dry-run |
+| 3 | Migration 003 not applied | CTO | Seals work; GRADING and all scoreboard/verdict views are unavailable until applied |
 | 4 | Repo is public | Founder | §7 |
 
 ---

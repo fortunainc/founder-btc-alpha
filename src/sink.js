@@ -17,6 +17,8 @@ import path from 'node:path';
 
 const CAPTURE_TABLE = 'fa_window_capture';
 const SETTLEMENT_TABLE = 'fa_settlement_grade';
+const SEAL_TABLE = 'fa_forecast_seal';
+const GRADE_TABLE = 'fa_forecast_grade';
 
 /**
  * Above this many pending rows, or this many consecutive failures, the sink
@@ -38,6 +40,8 @@ class BaseSink {
       errors: 0,
       rows_spilled: 0,
       spill_events: 0,
+      seals_written: 0,
+      grades_written: 0,
     };
     this._queue = [];
     this._consecutiveFailures = 0;
@@ -121,6 +125,40 @@ class BaseSink {
     }
   }
 
+  /**
+   * Write sealed forecasts. Idempotent by construction: the schema's
+   * UNIQUE(model_id, model_version, window_id) plus ON CONFLICT DO NOTHING
+   * means a re-run of the same seal point inserts nothing. This needs only
+   * INSERT privilege -- it never updates, so it works under the deliberately
+   * UPDATE-less grant from migration 002.
+   */
+  async writeSeals(rows) {
+    if (!rows.length) return { written: 0 };
+    try {
+      await this._writeIgnoreDuplicates(SEAL_TABLE, rows, 'model_id,model_version,window_id');
+      this.stats.seals_written += rows.length;
+      return { written: rows.length };
+    } catch (err) {
+      this.stats.errors += 1;
+      this.logger.error?.(`[sink] seal write failed: ${err.message}`);
+      return { written: 0, error: err.message };
+    }
+  }
+
+  /** Write forecast grades. Idempotent on seal_id. */
+  async writeGrades(rows) {
+    if (!rows.length) return { written: 0 };
+    try {
+      await this._writeIgnoreDuplicates(GRADE_TABLE, rows, 'seal_id');
+      this.stats.grades_written += rows.length;
+      return { written: rows.length };
+    } catch (err) {
+      this.stats.errors += 1;
+      this.logger.error?.(`[sink] grade write failed: ${err.message}`);
+      return { written: 0, error: err.message };
+    }
+  }
+
   async writeSettlement(row) {
     try {
       await this._write(SETTLEMENT_TABLE, [row]);
@@ -162,6 +200,16 @@ export class SupabaseSink extends BaseSink {
     const { error } = await client.from(table).insert(clean);
     if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
   }
+
+  async _writeIgnoreDuplicates(table, rows, conflictCols) {
+    const client = await this._ensureClient();
+    const clean = rows.map(({ _levels, ...rest }) => rest);
+    // ignoreDuplicates => ON CONFLICT DO NOTHING, which requires only INSERT.
+    const { error } = await client
+      .from(table)
+      .upsert(clean, { onConflict: conflictCols, ignoreDuplicates: true });
+    if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
+  }
 }
 
 export class DryRunSink extends BaseSink {
@@ -174,6 +222,8 @@ export class DryRunSink extends BaseSink {
     this.files = {
       [CAPTURE_TABLE]: path.join(this.dir, `${CAPTURE_TABLE}-${stamp}.jsonl`),
       [SETTLEMENT_TABLE]: path.join(this.dir, `${SETTLEMENT_TABLE}-${stamp}.jsonl`),
+      [SEAL_TABLE]: path.join(this.dir, `${SEAL_TABLE}-${stamp}.jsonl`),
+      [GRADE_TABLE]: path.join(this.dir, `${GRADE_TABLE}-${stamp}.jsonl`),
     };
   }
 
@@ -202,4 +252,4 @@ export function sinkFromEnv({ logger = console, forceDryRun = false } = {}) {
   return new SupabaseSink({ url, serviceRoleKey: key, logger });
 }
 
-export { CAPTURE_TABLE, SETTLEMENT_TABLE };
+export { CAPTURE_TABLE, SETTLEMENT_TABLE, SEAL_TABLE, GRADE_TABLE };

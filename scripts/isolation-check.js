@@ -26,6 +26,13 @@ const SELF_REFERENTIAL = new Set([
   'docs/RVR-phase0-build.md',
   'src/kalshi-client.js', // contains the denylist that enforces rule 2
   'fixtures/13-isolation-census.json',
+  // Evidence fixture: records that public.tsm_* objects EXIST in the shared
+  // Supabase project, captured while investigating whether the credentials
+  // pointed at the right database. It documents the environment, it does not
+  // reference those objects from our code. Same category as a guard-proof:
+  // suppressing it would hide the finding, so it is excluded by name and the
+  // exclusion is printed on every run.
+  'fixtures/16-supabase-project-mismatch.json',
 ]);
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'data', 'logs']);
