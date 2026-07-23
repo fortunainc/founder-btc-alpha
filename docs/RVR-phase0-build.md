@@ -24,7 +24,7 @@ substantiated it is marked BLOCKED with the exact reason rather than softened.
 | BRTI replica index (4 venues) | `src/replica-index.js` | VERIFIED |
 | Orderbook normaliser + DQ invariants | `src/orderbook.js` | VERIFIED |
 | Session bucketing + macro flagging | `src/session.js` | VERIFIED (calendar PARTIAL, §11) |
-| Batched sink (Supabase / dry-run) | `src/sink.js` | VERIFIED in dry-run; Supabase path BLOCKED |
+| Batched sink (Supabase / dry-run) | `src/sink.js` | **VERIFIED** — live Supabase writes confirmed |
 | Capture worker | `src/worker.js` | VERIFIED |
 | Mechanics verifier | `scripts/verify-mechanics.js` | VERIFIED |
 | Migration (5 tables, 2 views) | `migrations/001-founder-alpha-v1.sql` | VERIFIED |
@@ -361,7 +361,54 @@ Applied and independently verified: `tables_total=5`, `tables_rls_forced=5`,
 dispatch, **no `railway login` prompt was issued and no deploy was attempted**.
 `railway whoami` → `Unauthorized`.
 
-### Live Supabase writes: BLOCKED on migration 002 — a gap in MY migration
+### Live Supabase writes: **VERIFIED** ✅
+
+> **2026-07-23 15:32 UTC.** Fixture: `fixtures/18-live-writes-verified.json`.
+> Log: `logs/worker-live.log`. Unblocked by the CTO applying
+> `migrations/002-grant-service-role.sql`.
+>
+> Worker restarted **without** `--dry-run`:
+>
+> ```
+> INFO  [sink] using Supabase sink (schema founder_alpha)
+> INFO  series=KXBTC15M sink=supabase replica=replica-methodology-v1
+> INFO  discovered window KXBTC15M-26JUL231145-45 close=…15:45:00Z strike=64823.58
+> INFO  flushed 1 row(s) (supabase)
+> ```
+>
+> **Runtime proof — rows are in the table:**
+>
+> | Check | Result |
+> |---|---|
+> | `founder_alpha.fa_window_capture` row count | **37 and climbing** |
+> | `v_fa_capture_health` | **returns data** (see below) |
+> | `v_fa_replica_error` | 0 rows — by design, no window has *settled* since live writes began |
+> | `fa_forecast_seal` | **0 rows** — Phase 0 invariant holds |
+>
+> `v_fa_capture_health` for 2026-07-23:
+>
+> ```json
+> { "snapshots": 34, "windows_seen": 1, "gaps_over_30s": 0, "worst_gap_seconds": 0,
+>   "rows_with_any_flag": 0, "invariant_sum_violations": 0, "invariant_ts_violations": 0,
+>   "invariant_gap_violations": 0, "replica_unavailable_rows": 0,
+>   "uptime_pct_of_expected": 18.89 }
+> ```
+>
+> **Live invariants: all zero.** `up_mid + down_mid = 1.000` exactly on every row; four venues
+> contributing; `sink=supabase` confirmed, not dry-run.
+>
+> **`uptime_pct_of_expected: 18.89` is correct arithmetic, not a defect.** The worker joined an
+> in-progress window, so 34 observed snapshots are measured against a full-window expectation of
+> 180. It normalises once whole windows are captured. Flagging it because an 18.89% uptime figure
+> read in isolation would look alarming.
+>
+> **Still on disk, not yet backfilled:** 10,492 capture rows and 49 settlements from the
+> overnight dry run. Load with `node scripts/backfill.js --dry`, then without `--dry`. Not done
+> automatically — these tables are append-only, so an accidental double-run cannot be undone.
+> Note those rows carry the pre-fix `incomplete_book` label rather than
+> `one_sided_book_at_extreme` (§7).
+
+### How this was unblocked — superseded diagnosis, retained for the record
 
 > **Re-verified 2026-07-23 ~07:15 UTC.** Fixtures: `fixtures/17-grant-verification.txt`,
 > `migrations/002-grant-service-role.sql`
@@ -529,7 +576,7 @@ healthy. `README-DEPLOY.md` §5 makes confirming `sink=supabase` a required post
 | 1 | **Repo is PUBLIC** (must be private) | Founder | Dispatch §A compliance |
 | 2 | Railway project does not exist | Founder | Deployment |
 | 3 | Railway CLI unauthenticated | Founder | CLI deploy |
-| 4 | **`service_role` lacks GRANTs on `founder_alpha`** (`42501`). Defect in migration 001, which I wrote; fix written and proven in `migrations/002-grant-service-role.sql`. | CTO — apply 002 via SQL editor | Live writes + items 6–7 |
+| ~~4~~ | ~~`service_role` lacks GRANTs~~ — **RESOLVED**: CTO applied migration 002; live writes VERIFIED, 37+ rows in `fa_window_capture`. | — | ✅ Done |
 | 4b | Rotate the `service_role` key (pasted into a chat transcript). CTO accepted; scheduled as a **controlled** rotation since it powers TSM prod Vercel env + crons. | Founder + CTO | Credential hygiene |
 | 5 | Rate-limit tier not exposed by API | Kalshi | Item 3 |
 | 6 | Per-user position limit needs a forbidden endpoint | Founder (read from UI) | Item 2 → VERIFIED |

@@ -1,0 +1,84 @@
+{
+  "captured_at": "2026-07-23T15:35:22.366Z",
+  "status": "VERIFIED",
+  "claim": "Live Supabase writes to founder_alpha.fa_window_capture are working end to end.",
+  "unblocked_by": "CTO applied migrations/002-grant-service-role.sql",
+  "worker": {
+    "mode": "live",
+    "sink": "supabase",
+    "log": "logs/worker-live.log",
+    "started": "2026-07-23T15:32:15Z"
+  },
+  "proof": {
+    "fa_window_capture_row_count": 37,
+    "v_fa_capture_health": [
+      {
+        "day": "2026-07-23",
+        "snapshots": 37,
+        "windows_seen": 1,
+        "final120_snapshots": 0,
+        "gaps_over_30s": 0,
+        "worst_gap_seconds": 0,
+        "rows_with_any_flag": 0,
+        "invariant_sum_violations": 0,
+        "invariant_ts_violations": 0,
+        "invariant_gap_violations": 0,
+        "replica_unavailable_rows": 0,
+        "uptime_pct_of_expected": 20.56
+      }
+    ],
+    "v_fa_replica_error_rows": 0,
+    "v_fa_replica_error_note": "Empty by design: no window has SETTLED since live writes began. Populates on first live settlement.",
+    "fa_forecast_seal_row_count": 0,
+    "fa_forecast_seal_note": "Must remain 0 in Phase 0. Invariant holds.",
+    "recent_rows": [
+      {
+        "window_id": "KXBTC15M-26JUL231145-45",
+        "ts": "2026-07-23T15:35:16.712+00:00",
+        "up_mid": 0.745,
+        "down_mid": 0.255,
+        "replica_index": 64878.08,
+        "replica_60s_avg": 64864.64,
+        "replica_venue_count": 4,
+        "session_bucket": "us_rth",
+        "capture_phase": "normal",
+        "quality_flags": {}
+      },
+      {
+        "window_id": "KXBTC15M-26JUL231145-45",
+        "ts": "2026-07-23T15:35:11.705+00:00",
+        "up_mid": 0.685,
+        "down_mid": 0.315,
+        "replica_index": 64865.18,
+        "replica_60s_avg": 64863.98,
+        "replica_venue_count": 4,
+        "session_bucket": "us_rth",
+        "capture_phase": "normal",
+        "quality_flags": {}
+      },
+      {
+        "window_id": "KXBTC15M-26JUL231145-45",
+        "ts": "2026-07-23T15:35:06.7+00:00",
+        "up_mid": 0.705,
+        "down_mid": 0.295,
+        "replica_index": 64871.93,
+        "replica_60s_avg": 64863.64,
+        "replica_venue_count": 4,
+        "session_bucket": "us_rth",
+        "capture_phase": "normal",
+        "quality_flags": {}
+      }
+    ]
+  },
+  "invariants_live": {
+    "sum_out_of_band": 0,
+    "non_monotonic_ts": 0,
+    "capture_gaps_over_30s": 0,
+    "replica_unavailable": 0,
+    "note": "up_mid + down_mid = 1.000 exactly on every live row."
+  },
+  "uptime_caveat": "uptime_pct_of_expected=18.89 is correct arithmetic, not a defect: the worker joined an in-progress window, so observed snapshots are measured against a full-window expectation of 180. It normalises once full windows are captured.",
+  "local_data_pending_backfill": {
+    "capture_rows": null
+  }
+}
