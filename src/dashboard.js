@@ -600,20 +600,23 @@ function renderLiveEngineCalls(data) {
   const latestOf = (eng) => rows.find((r) => r.engine_id === eng) || null;
 
   const rowB = (title, b, closeIso, sealedAt, extra) => {
-    const left = closeIso ? timeRemaining(closeIso) : null;
+    const msLeft = closeIso ? (new Date(closeIso).getTime() - Date.now()) : null;
+    const tstate = msLeft == null ? null
+      : (msLeft > 3000 ? `${esc(timeRemaining(closeIso))} left`
+        : (msLeft > -90000 ? 'settling now' : 'settled'));
     const ago = sealedAt ? minsAgo(sealedAt) : null;
     const meta = [
       closeIso ? `settles ${fmtClock(closeIso)} PT` : null,
-      left ? `${esc(left)} left` : null,
+      tstate,
       ago ? `sealed ${esc(ago)}` : null,
       extra || null,
     ].filter(Boolean).join(' · ');
-    return `<div class="lc-row"><span class="lc-eng">${esc(title)}</span><span class="badge ${b.c}">${esc(b.t)}</span><span class="lc-meta muted small">${esc('')}${meta}</span></div>`;
+    return `<div class="lc-row"><span class="lc-eng">${esc(title)}</span><span class="badge ${b.c}">${esc(b.t)}</span><span class="lc-meta muted small">${meta}</span></div>`;
   };
 
-  // Phase-1 forecast — the same mapping the hero uses.
-  const p1o = d.seal ? foundOutput(d.seal) : null;
-  const p1b = p1o ? { t: p1o.badge, c: p1o.cls } : { t: '—', c: 'd-flat' };
+  // Phase-1 forecast — foundOutput is null-safe (no seal → NO TRADE), so it matches the hero exactly.
+  const p1o = foundOutput(d.seal);
+  const p1b = { t: p1o.badge, c: p1o.cls };
   const p1row = rowB('Forecast · edge prob', p1b, d.closeIso, d.seal ? d.seal.sealed_at : null, null);
 
   const edge = latestOf('btc-alpha-v2-scalp');
@@ -625,8 +628,8 @@ function renderLiveEngineCalls(data) {
 
   return `
   <section class="card livecalls">
-    <div class="dhead"><span class="dlabel">Live TSM calls — this window</span><span class="mode-chip">SHADOW</span></div>
-    <p class="muted small">The current recommendation from each engine (newest seal). Forecast = edge probability · V2.1 = conviction · V2.2 = expected dollars after fees. Auto-refreshes every 10s.</p>
+    <div class="dhead"><span class="dlabel">Live TSM calls · latest per engine</span><span class="mode-chip">SHADOW</span></div>
+    <p class="muted small">The current recommendation from each engine (newest seal). Forecast = edge probability · V2.1 = conviction · V2.2 = expected dollars after fees. Engines seal once per window (~minute 3); the forecast re-seals through the window. Auto-refreshes every 10s.</p>
     ${p1row}
     ${rowB('V2.1 Arbiter · edge', badge(edge ? edge.recommendation : null), edge ? edge.window_close_ts : null, edge ? edge.sealed_at : null, null)}
     ${rowB('V2.2 Profit · $ EV', badge(prof ? prof.recommendation : null), prof ? prof.window_close_ts : null, prof ? prof.sealed_at : null, pextra)}
