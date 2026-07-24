@@ -43,6 +43,8 @@ const DRY_RUN = process.argv.includes('--dry-run') || process.env.CAPTURE_DRY_RU
 // splice is provably inert until the env flag is deliberately turned on. Still shadow-only
 // (writes to fa_v2_decisions/grades; places no orders; emission_prod unaffected).
 const V2_SHADOW = process.env.V2_SHADOW_ENABLED === 'true';
+// v2.2 profit engine (shadow): ON by default whenever V2 shadow is on; set V2_PROFIT_ENABLED=false to disable.
+const V2_PROFIT = V2_SHADOW && process.env.V2_PROFIT_ENABLED !== 'false';
 const MAX_WINDOWS = Number(
   (process.argv.find((a) => a.startsWith('--max-windows=')) || '').split('=')[1] || 0
 );
@@ -89,6 +91,7 @@ class CaptureWorker {
       ? new V2Scheduler({
           writeDecision: (row) => this.sink.writeV2Decision(row),
           writeGrade: (row) => this.sink.writeV2Grade(row),
+          withProfitEngine: V2_PROFIT,
           getOrderbook: async (windowId) => {
             const ob = await this.kalshi.getOrderbook(windowId, 100);
             if (ob.status !== 200) throw new Error(`orderbook HTTP ${ob.status}`);

@@ -15,6 +15,8 @@
 
 import { buildArbiterInput, dataReady } from './evidence.js';
 import { arbitrate } from './arbiter.js';
+import { modelB1 } from '../forecaster.js';
+import { selectProfit, PROFIT_ENGINE_ID, PROFIT_SPEC_VERSION } from './profit.js';
 
 export const SPEC_VERSION = 'v2.1.0';   // v2.1: regime-based Arbiter + Arbitration Ledger
 export const ENGINE_ID = 'btc-alpha-v2-scalp';
@@ -112,7 +114,7 @@ export function gradeDecision(decision, settlement) {
   const outcome = settlement.outcome;
   const base = {
     window_id: decision.window_id,
-    engine_id: ENGINE_ID,
+    engine_id: decision.engine_id || ENGINE_ID,
     recommendation: decision.recommendation,
     settled_outcome: outcome,
     settlement_value: settlement.settlement_value ?? null,
@@ -136,4 +138,53 @@ export function gradeDecision(decision, settlement) {
   const payoff = won ? 1 : 0;
   const net = Number((payoff - entry - fee).toFixed(4));
   return { ...base, call_correct: won, entry_price: entry, fee, net_pnl: net };
+}
+
+/**
+ * TSM model probability that BTC settles ABOVE the strike (YES), from the same
+ * no-drift diffusion the Phase-1 forecaster seals (modelB1). Returns null when the
+ * inputs are not computable (thin vol, missing strike) — the profit engine then abstains.
+ */
+export function profitProbability(s) {
+  const r = modelB1({ S: s.S, K: s.K, sigma: s.sigmaPerSec, tau: s.tauSec });
+  return (r && r.pass === false && Number.isFinite(r.sealed_p)) ? r.sealed_p : null;
+}
+
+/**
+ * v2.2 — seal ONE profit-objective decision for the current window, on the SAME
+ * inputs as the arbiter seal. Written as engine_id 'btc-alpha-v2-profit' (distinct
+ * unique key), graded by the same gradeDecision path. Shadow only.
+ */
+export function sealProfitDecision(s) {
+  const p_yes = profitProbability(s);
+  const sel = selectProfit({ p_yes, up_ask: s.up_ask ?? null, down_ask: s.down_ask ?? null, feeFn: kalshiFee });
+  const half_spread = s.half_spread != null ? s.half_spread
+    : (s.up_ask != null && s.up_bid != null ? Number(((s.up_ask - s.up_bid) / 2).toFixed(6)) : null);
+  return {
+    window_id: s.window_id,
+    sealed_at: new Date(s.now).toISOString(),
+    window_close_ts: s.window_close_ts ?? null,
+    seconds_to_close_at_seal: s.tauSec != null ? Math.round(s.tauSec) : null,
+    engine_id: PROFIT_ENGINE_ID,
+    spec_version: PROFIT_SPEC_VERSION,
+    recommendation: sel.recommendation,
+    status: sel.status,
+    reason: sel.reason,
+    strike: s.K ?? null,
+    replica_index: s.S ?? null,
+    market_p: s.market_p ?? null,
+    up_ask: s.up_ask ?? null, down_ask: s.down_ask ?? null,
+    up_bid: s.up_bid ?? null, down_bid: s.down_bid ?? null,
+    half_spread,
+    regime: null, reachability_bucket: null, conflict_signature: null,
+    conviction: null, agreement: null, matrix_version: null,
+    consensus: null,
+    families: {},
+    evidence: {
+      p_model: p_yes != null ? Number(p_yes.toFixed(6)) : null,
+      ev_yes: sel.ev_yes, ev_no: sel.ev_no, chosen_ev: sel.chosen_ev,
+      min_edge: sel.min_edge, objective: 'expected_net_dollars_after_fees',
+    },
+    is_replay: !!s.is_replay,
+  };
 }

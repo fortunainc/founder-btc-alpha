@@ -19,7 +19,7 @@
  */
 
 import { BarBuilder } from './bars.js';
-import { sealDecision, gradeDecision } from './engine.js';
+import { sealDecision, gradeDecision, sealProfitDecision } from './engine.js';
 
 export const SEAL_TAU_SEC = 720;      // minute 3 of a 900s window — the single seal instant
 export const SEAL_FLOOR_SEC = 120;    // never seal in the final 2 min: that is not a "first-3-minutes" call
@@ -37,7 +37,7 @@ export class V2Scheduler {
    * @param {boolean} [deps.isReplay]
    * @param {number} [deps.sealTauSec]
    */
-  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, getTradeTape, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC } = {}) {
+  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, getTradeTape, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC, withProfitEngine = false } = {}) {
     this.writeDecision = writeDecision;
     this.writeGrade = writeGrade;
     this.getOrderbook = getOrderbook;
@@ -46,6 +46,7 @@ export class V2Scheduler {
     this.logger = logger;
     this.isReplay = !!isReplay;
     this.sealTauSec = sealTauSec;
+    this.withProfitEngine = withProfitEngine === true;
     this.bars = new BarBuilder();
     /** @type {Map<string,{sealing:boolean,sealed:boolean,decision:object|null,decisionId:any,graded:boolean,missed:boolean}>} */
     this.windows = new Map();
@@ -53,7 +54,7 @@ export class V2Scheduler {
 
   _state(windowId) {
     let s = this.windows.get(windowId);
-    if (!s) { s = { sealing: false, sealed: false, decision: null, decisionId: null, graded: false, missed: false }; this.windows.set(windowId, s); }
+    if (!s) { s = { sealing: false, sealed: false, decision: null, decisionId: null, graded: false, missed: false, profitDecision: null, profitDecisionId: null, profitGraded: false }; this.windows.set(windowId, s); }
     return s;
   }
 
@@ -104,7 +105,7 @@ export class V2Scheduler {
     const down_bid = book?.down_bid ?? null, down_ask = book?.down_ask ?? null;
     const market_p = (up_bid != null && up_ask != null) ? Number(((up_bid + up_ask) / 2).toFixed(6)) : null;
 
-    const decision = sealDecision({
+    const sealInput = {
       window_id: w.window_id,
       window_close_ts: new Date(w.close_time).toISOString(),
       now,
@@ -115,16 +116,33 @@ export class V2Scheduler {
       sigmaPerSec,
       market_p,
       up_ask, down_ask, up_bid, down_bid,
+      half_spread: (up_ask != null && up_bid != null) ? (up_ask - up_bid) / 2 : null,
       macroEvent: !!this.getMacroEvent(now),
       tape: this.getTradeTape(),
       is_replay: this.isReplay,
-    });
+    };
+    const decision = sealDecision(sealInput);
 
     const res = await this.writeDecision(decision);
     st.sealed = true;                       // one seal per window, final
     st.decision = decision;
     st.decisionId = res?.id ?? null;
     this.logger.info?.(`[v2] SEAL ${w.window_id} τ-${secondsToClose}s → ${decision.recommendation} (${decision.status})`);
+
+    // v2.2 PROFIT engine (shadow): a SECOND sealed decision on the same inputs, picked by
+    // expected net dollars after fees rather than conviction. Distinct engine_id → no unique
+    // conflict; isolated so a profit write never burns the arbiter seal.
+    if (this.withProfitEngine) {
+      try {
+        const profitDecision = sealProfitDecision(sealInput);
+        const pres = await this.writeDecision(profitDecision);
+        st.profitDecision = profitDecision;
+        st.profitDecisionId = pres?.id ?? null;
+        this.logger.info?.(`[v2] SEAL(profit) ${w.window_id} → ${profitDecision.recommendation} (ev=${profitDecision.evidence?.chosen_ev})`);
+      } catch (e) {
+        this.logger.error?.(`[v2] profit seal ${w.window_id} failed (isolated): ${e.message}`);
+      }
+    }
     return decision;
   }
 
@@ -143,6 +161,19 @@ export class V2Scheduler {
     const res = await this.writeGrade(grade);
     st.graded = true;
     this.logger.info?.(`[v2] GRADE ${w.window_id} ${st.decision.recommendation}/${settlement.outcome} → net=${grade.net_pnl} correct=${grade.call_correct}`);
+
+    // grade the profit engine's decision too (same settlement, its own row)
+    if (st.profitDecision && !st.profitGraded) {
+      try {
+        const pgrade = gradeDecision(st.profitDecision, settlement);
+        if (st.profitDecisionId != null) pgrade.decision_id = st.profitDecisionId;
+        await this.writeGrade(pgrade);
+        st.profitGraded = true;
+        this.logger.info?.(`[v2] GRADE(profit) ${w.window_id} ${st.profitDecision.recommendation}/${settlement.outcome} → net=${pgrade.net_pnl}`);
+      } catch (e) {
+        this.logger.error?.(`[v2] profit grade ${w.window_id} failed (isolated): ${e.message}`);
+      }
+    }
     return { graded: res?.written ? 1 : 0, grade };
   }
 }

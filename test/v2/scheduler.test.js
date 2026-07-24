@@ -117,3 +117,27 @@ test('settling a window that was never sealed grades nothing (honest no-op)', as
   assert.equal(r.graded, 0);
   assert.equal(grades.length, 0);
 });
+
+
+test('v2.2 profit engine (opt-in): seals + grades a SECOND decision under its own engine_id', async () => {
+  const decisions = []; const grades = [];
+  const now = Date.parse('2026-07-24T20:03:00Z');
+  const closeIso = new Date(now + 720_000).toISOString();
+  const sch = new V2Scheduler({
+    withProfitEngine: true,
+    writeDecision: (row) => { decisions.push(row); return { written: 1, id: decisions.length }; },
+    writeGrade: (row) => { grades.push(row); return { written: 1 }; },
+    getOrderbook: async () => ({ up_bid: 0.53, up_ask: 0.55, down_bid: 0.44, down_ask: 0.47 }),
+    getMacroEvent: () => false,
+    getTradeTape: () => null,
+  });
+  // warm the bar buffer with >15min of ticks so decide()/model can compute
+  for (let t = now - 16 * 60_000; t <= now; t += 1000) sch.ingestTick(t, 64500 + Math.sin(t / 5000) * 20);
+  const w = { window_id: 'W-PROFIT', close_time: closeIso, reference_strike: 64000 };
+  await sch.onTick({ windows: [w], replicaIndex: 64500, now });
+  const engines = decisions.map((d) => d.engine_id).sort();
+  assert.ok(engines.includes('btc-alpha-v2-profit'), 'a profit decision was sealed');
+  assert.equal(decisions.length, 2, 'arbiter + profit = two sealed decisions this window');
+  await sch.onSettle(w, { outcome: 'yes', settlement_value: 64510, graded_at: closeIso });
+  assert.equal(grades.length, 2, 'both decisions graded');
+});

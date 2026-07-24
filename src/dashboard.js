@@ -172,7 +172,7 @@ async function loadData(client) {
 
   const v2board = await client
     .from('v_fa_v2_scoreboard')
-    .select('day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
+    .select('engine_id,day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
   out.v2board = v2board.error ? [] : v2board.data;
   if (v2board.error) out.errors.v2board = `${v2board.error.code || ''} ${v2board.error.message}`.trim();
 
@@ -586,21 +586,41 @@ function renderBoard(rows) {
 function renderV2Panel(data) {
   const rows = (data && data.v2board) || [];
   if (!rows.length) return '';
-  const t = rows.reduce((a, r) => ({
-    graded: a.graded + Number(r.graded_windows || 0),
-    decided: a.decided + Number(r.decided_calls || 0),
-    no_trades: a.no_trades + Number(r.no_trades || 0),
-    correct: a.correct + Number(r.calls_correct || 0),
-    net: a.net + Number(r.net_pnl_total || 0),
-  }), { graded: 0, decided: 0, no_trades: 0, correct: 0, net: 0 });
-  const acc = t.decided ? `${((t.correct / t.decided) * 100).toFixed(0)}%` : '—';
-  const net = `${t.net >= 0 ? '+' : ''}${t.net.toFixed(2)}`;
-  return `
+  const sumFor = (engineId) => rows
+    .filter((r) => !engineId || r.engine_id === engineId)
+    .reduce((a, r) => ({
+      graded: a.graded + Number(r.graded_windows || 0),
+      decided: a.decided + Number(r.decided_calls || 0),
+      no_trades: a.no_trades + Number(r.no_trades || 0),
+      correct: a.correct + Number(r.calls_correct || 0),
+      net: a.net + Number(r.net_pnl_total || 0),
+    }), { graded: 0, decided: 0, no_trades: 0, correct: 0, net: 0 });
+  const money = (v) => `${v >= 0 ? '+' : ''}$${v.toFixed(2)}`;
+  const acc = (t) => (t.decided ? `${((t.correct / t.decided) * 100).toFixed(0)}%` : '—');
+
+  // v2.1 = the edge/conviction arbiter; v2.2 = the profit-objective engine (may be absent until deployed).
+  const edge = sumFor('btc-alpha-v2-scalp');
+  const profit = sumFor('btc-alpha-v2-profit');
+  const hasProfit = profit.graded > 0 || profit.decided > 0;
+
+  const edgeCard = `
     <section class="card">
-      <h2>V2.1 Arbiter — regime-based (shadow)</h2>
-      <p class="muted small">The learning arbiter: regime classification + conflict resolution. Separate from the Phase-1 forecasts above; early sample.</p>
-      <p><strong>${t.decided}</strong> decided calls · <strong>${t.no_trades}</strong> no-trade · accuracy <strong>${acc}</strong> (${t.correct}/${t.decided}) · paper net <strong>${net}</strong> · ${t.graded} graded windows</p>
+      <h2>V2.1 Arbiter — regime-based, picks by EDGE (shadow)</h2>
+      <p class="muted small">Takes the side where the signal is strongest — where a mispricing may exist. Separate from the Phase-1 forecasts above; early sample.</p>
+      <p><strong>${edge.decided}</strong> decided calls · <strong>${edge.no_trades}</strong> no-trade · accuracy <strong>${acc(edge)}</strong> (${edge.correct}/${edge.decided}) · paper net <strong>${money(edge.net)}</strong> · ${edge.graded} graded windows</p>
     </section>`;
+
+  if (!hasProfit) return edgeCard;
+
+  const lead = profit.net - edge.net;
+  const profitCard = `
+    <section class="card">
+      <h2>V2.2 Profit engine — picks by EXPECTED DOLLARS (shadow)</h2>
+      <p class="muted small">Same windows, same forecast. Takes a side ONLY when its probability beats the executable ask + fees, and stands down on a strong-but-priced-in call. This is the "make money after costs" test.</p>
+      <p><strong>${profit.decided}</strong> trades taken · <strong>${profit.no_trades}</strong> stood down · accuracy <strong>${acc(profit)}</strong> (${profit.correct}/${profit.decided}) · paper net <strong>${money(profit.net)}</strong> · ${profit.graded} graded windows</p>
+      <p class="small">Head-to-head paper net on identical windows: profit ${money(profit.net)} vs edge ${money(edge.net)} — <strong>${lead >= 0 ? 'profit leads by ' : 'edge leads by '}$${Math.abs(lead).toFixed(2)}</strong>. Selectivity: profit takes ${profit.decided} vs edge ${edge.decided} of the same windows.</p>
+    </section>`;
+  return edgeCard + profitCard;
 }
 
 function renderPage(data) {
