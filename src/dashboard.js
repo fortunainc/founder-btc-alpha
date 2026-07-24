@@ -170,6 +170,12 @@ async function loadData(client) {
   out.board = board.error ? [] : board.data;
   if (board.error) out.errors.board = `${board.error.code || ''} ${board.error.message}`.trim();
 
+  const v2board = await client
+    .from('v_fa_v2_scoreboard')
+    .select('day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
+  out.v2board = v2board.error ? [] : v2board.data;
+  if (v2board.error) out.errors.v2board = `${v2board.error.code || ''} ${v2board.error.message}`.trim();
+
   const pnl = await client
     .from('v_fa_paper_pnl')
     .select('seal_point,call,n_settled,n_wins,net_pnl,avg_pnl_per_trade,avg_entry_price,total_fees');
@@ -577,6 +583,26 @@ function renderBoard(rows) {
     <tbody>${body}</tbody></table>`;
 }
 
+function renderV2Panel(data) {
+  const rows = (data && data.v2board) || [];
+  if (!rows.length) return '';
+  const t = rows.reduce((a, r) => ({
+    graded: a.graded + Number(r.graded_windows || 0),
+    decided: a.decided + Number(r.decided_calls || 0),
+    no_trades: a.no_trades + Number(r.no_trades || 0),
+    correct: a.correct + Number(r.calls_correct || 0),
+    net: a.net + Number(r.net_pnl_total || 0),
+  }), { graded: 0, decided: 0, no_trades: 0, correct: 0, net: 0 });
+  const acc = t.decided ? `${((t.correct / t.decided) * 100).toFixed(0)}%` : '—';
+  const net = `${t.net >= 0 ? '+' : ''}${t.net.toFixed(2)}`;
+  return `
+    <section class="card">
+      <h2>V2.1 Arbiter — regime-based (shadow)</h2>
+      <p class="muted small">The learning arbiter: regime classification + conflict resolution. Separate from the Phase-1 forecasts above; early sample.</p>
+      <p><strong>${t.decided}</strong> decided calls · <strong>${t.no_trades}</strong> no-trade · accuracy <strong>${acc}</strong> (${t.correct}/${t.decided}) · paper net <strong>${net}</strong> · ${t.graded} graded windows</p>
+    </section>`;
+}
+
 function renderPage(data) {
   // Normalize so a partial data object (or a failed query) never throws.
   data = {
@@ -740,6 +766,7 @@ function renderPage(data) {
       ${renderCallsTable(data.calls)}
       <p class="muted small">Cumulative scoreboard by forecast timing and side:</p>
       ${renderBoard(data.board)}
+      ${renderV2Panel(data)}
     </div>
   </details>
 
