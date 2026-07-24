@@ -37,11 +37,12 @@ export class V2Scheduler {
    * @param {boolean} [deps.isReplay]
    * @param {number} [deps.sealTauSec]
    */
-  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC } = {}) {
+  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, getTradeTape, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC } = {}) {
     this.writeDecision = writeDecision;
     this.writeGrade = writeGrade;
     this.getOrderbook = getOrderbook;
     this.getMacroEvent = typeof getMacroEvent === 'function' ? getMacroEvent : () => false;
+    this.getTradeTape = typeof getTradeTape === 'function' ? getTradeTape : () => null;
     this.logger = logger;
     this.isReplay = !!isReplay;
     this.sealTauSec = sealTauSec;
@@ -115,6 +116,7 @@ export class V2Scheduler {
       market_p,
       up_ask, down_ask, up_bid, down_bid,
       macroEvent: !!this.getMacroEvent(now),
+      tape: this.getTradeTape(),
       is_replay: this.isReplay,
     });
 

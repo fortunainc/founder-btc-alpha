@@ -31,6 +31,8 @@ import {
 import { runPreflight } from './preflight.js';
 import { startDashboard } from './dashboard.js';
 import { V2Scheduler } from './v2/scheduler.js';
+import { TradeTape } from './v2/tradetape.js';
+import { TradeFeed } from './v2/trade-feed.js';
 
 loadEnv();
 
@@ -76,6 +78,10 @@ class CaptureWorker {
     };
     this._timers = [];
 
+    // V2 shadow order-flow tape (public trade feeds). Only when the flag is on.
+    this.tradeTape = V2_SHADOW ? new TradeTape() : null;
+    this.tradeFeed = null;
+
     // V2 shadow scheduler — only constructed when the flag is on. Injected deps only;
     // it never touches Phase-1 state. getOrderbook THROWS on a bad book so a transient
     // failure retries next tick rather than burning the window's single minute-3 seal.
@@ -91,6 +97,7 @@ class CaptureWorker {
           getMacroEvent: (now) => {
             try { return macroFlag(new Date(now), this.macro).flag; } catch { return false; }
           },
+          getTradeTape: () => this.tradeTape,
           logger: log,
           isReplay: false,
         })
@@ -109,6 +116,18 @@ class CaptureWorker {
       log.warn(`replica venue ${v} reconnecting in ${delay}ms (${reason})`)
     );
     this.replica.start();
+
+    // V2 shadow: start the public trade feeds that fill the order-flow tape.
+    // Isolated + graceful — if a feed is down the tape stays thin and order flow
+    // simply abstains; Phase-1 is never affected.
+    if (this.tradeTape) {
+      try {
+        this.tradeFeed = new TradeFeed({ tape: this.tradeTape, logger: log }).start();
+        log.info('v2 order-flow trade feed started (coinbase + kraken)');
+      } catch (e) {
+        log.warn(`v2 trade feed failed to start (order flow disabled): ${e.message}`);
+      }
+    }
 
     // Founder-only read-only dashboard. Only starts with a Supabase client
     // (nothing to show against a dry-run sink) and a token set. It reads the
@@ -143,6 +162,7 @@ class CaptureWorker {
     log.info(`shutting down (${reason})`);
     for (const t of this._timers) clearInterval(t);
     this.replica.stop();
+    if (this.tradeFeed) { try { this.tradeFeed.stop(); } catch { /* already closed */ } }
     if (this.dashboard) { try { this.dashboard.close(); } catch { /* already closed */ } }
     const res = await this.sink.flush();
     log.info(`final flush wrote ${res.written} row(s); ${this.sink.pending} still pending`);

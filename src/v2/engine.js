@@ -30,6 +30,7 @@ export function buildContext(s) {
   return {
     S: s.S, K: s.K, tauSec: s.tauSec,
     bars: s.bars,
+    tape: s.tape ?? null,          // trade tape for order flow (may be absent)
     sigmaPerSec: s.sigmaPerSec,
     market_p: s.market_p,
     up_ask: s.up_ask, down_ask: s.down_ask, up_bid: s.up_bid, down_bid: s.down_bid,

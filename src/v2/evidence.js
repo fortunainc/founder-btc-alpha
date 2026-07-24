@@ -12,6 +12,7 @@
 
 import { f3Momentum, f4Volatility } from './families.js';
 import { f2Structure } from './structure.js';
+import { f5OrderFlow } from './orderflow.js';
 
 export const WARMUP_MS = 15 * 60_000;
 
@@ -33,17 +34,20 @@ export function buildArbiterInput(ctx, opts = {}) {
   const f3 = f3Momentum(ctx);
   const f4 = f4Volatility(ctx);
   const f2 = f2Structure(ctx);
+  const f5 = f5OrderFlow(ctx); // reads ctx.tape; 'flat' when the feed is thin/absent
 
   const momSide = f3.vote === 'long' ? 'yes' : f3.vote === 'short' ? 'no' : 'flat';
   const evidence = {
-    // ACTIVE today (from data we already have):
+    // ACTIVE today:
+    order_flow: f5.side === 'flat' ? null
+      : { side: f5.side, strength: f5.strength, leading: true, absorbing: !!(f5.detail && f5.detail.absorbing) },
     momentum: momSide === 'flat' ? null
       : { side: momSide, strength: Number(f3.confidence.toFixed(3)), leading: true,
           consistent: (f3.detail && f3.detail.consistency != null ? f3.detail.consistency : 0) >= 0.5 },
     structure: f2.side === 'flat' ? null
       : { side: f2.side, strength: f2.strength, trend: f2.trend, leading: false },
-    // RESERVED — slot in as each factor is built (order flow, VWAP, S/R, MTF, liquidity):
-    order_flow: null, vwap: null, liquidity: null, s_r: null, mtf: null,
+    // RESERVED — slot in as each factor is built (VWAP, S/R, MTF, liquidity):
+    vwap: null, liquidity: null, s_r: null, mtf: null,
   };
 
   return {
@@ -53,7 +57,7 @@ export function buildArbiterInput(ctx, opts = {}) {
     eventFlag: !!opts.macroEvent,
     breakout: f2.breakout || null,
     evidence,
-    readings: { structure: f2.reading, momentum: f3.reading, volatility: f4.reading },
+    readings: { structure: f2.reading, momentum: f3.reading, volatility: f4.reading, order_flow: f5.reading },
   };
 }
 
