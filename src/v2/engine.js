@@ -13,9 +13,10 @@
  * Pure and deterministic: no I/O, no clock reads (timestamps are passed in).
  */
 
-import { decide } from './decision.js';
+import { buildArbiterInput, dataReady } from './evidence.js';
+import { arbitrate } from './arbiter.js';
 
-export const SPEC_VERSION = 'v2.0.0';
+export const SPEC_VERSION = 'v2.1.0';   // v2.1: regime-based Arbiter + Arbitration Ledger
 export const ENGINE_ID = 'btc-alpha-v2-scalp';
 
 /** Canonical Kalshi fee for one contract at price p: ceil(0.07*p*(1-p)) in dollars. */
@@ -44,8 +45,24 @@ export function buildContext(s) {
  */
 export function sealDecision(s) {
   const ctx = buildContext(s);
-  const d = decide(ctx);
   const bars = s.bars;
+
+  let recommendation = 'NO_TRADE';
+  let status = 'no_forecast_data';
+  let reason = 'Not enough live data to make a disciplined call yet — staying out.';
+  let ledger = null;
+  let z = null;
+
+  if (dataReady(ctx)) {
+    const input = buildArbiterInput(ctx, { macroEvent: !!s.macroEvent });
+    z = input.z;
+    const res = arbitrate(input);
+    recommendation = res.decision;    // TAKE_YES | TAKE_NO | NO_TRADE
+    status = 'ok';
+    reason = res.reason;
+    ledger = res.ledger;
+  }
+
   return {
     window_id: s.window_id,
     sealed_at: new Date(s.now).toISOString(),
@@ -53,22 +70,29 @@ export function sealDecision(s) {
     seconds_to_close_at_seal: s.tauSec != null ? Math.round(s.tauSec) : null,
     engine_id: ENGINE_ID,
     spec_version: SPEC_VERSION,
-    recommendation: d.recommendation,   // TAKE_YES | TAKE_NO | NO_TRADE
-    status: d.status,                    // ok | no_forecast_data
-    reason: d.reason,
+    recommendation,
+    status,
+    reason,
     strike: s.K ?? null,
     replica_index: s.S ?? null,
-    market_p: s.market_p ?? null,
+    market_p: s.market_p ?? null,     // recorded for paper P&L only — NOT a directional input
     up_ask: s.up_ask ?? null, down_ask: s.down_ask ?? null,
     up_bid: s.up_bid ?? null, down_bid: s.down_bid ?? null,
     half_spread: ctx.half_spread,
-    consensus: d.detail.consensus ?? null,
-    families: d.families,
+    // ---- Arbitration Ledger (v2.1) ----
+    regime: ledger ? ledger.regime : null,
+    reachability_bucket: ledger ? ledger.reachability_bucket : null,
+    conflict_signature: ledger ? ledger.conflict_signature : null,
+    conviction: ledger ? ledger.conviction : null,
+    agreement: ledger ? ledger.agreement : null,
+    matrix_version: ledger ? ledger.matrix_version : null,
+    consensus: ledger ? ledger.raw_conviction : null,   // kept: raw directional conviction
+    families: ledger ? ledger.evidence : {},            // per-factor evidence vector
     evidence: {
+      z: z != null ? Number(z.toFixed(4)) : null,
       sigmaPerSec: s.sigmaPerSec ?? null,
       history_ms: bars && typeof bars.historyMs === 'function' ? bars.historyMs(s.now) : null,
-      yes_plausible: d.detail.yesPlausible ?? null,
-      no_plausible: d.detail.noPlausible ?? null,
+      applied_weights: ledger ? ledger.applied_weights : null,
     },
     is_replay: !!s.is_replay,
   };

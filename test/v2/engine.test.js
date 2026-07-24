@@ -30,10 +30,16 @@ test('sealDecision produces one immutable, fully-formed row', () => {
   assert.equal(row.window_id, 'KXBTC15M-26JUL242100-35');
   assert.equal(row.engine_id, ENGINE_ID);
   assert.equal(row.spec_version, SPEC_VERSION);
-  assert.equal(row.recommendation, 'TAKE_NO'); // founder example
-  assert.match(row.reason, /Recommendation: TAKE NO\./);
+  // Founder example: BTC $47 below strike vs a ±$18 expected move ⇒ z≈-2.6 ⇒
+  // reachability decides BELOW ⇒ the arbiter returns TAKE_NO.
+  assert.equal(row.recommendation, 'TAKE_NO');
+  assert.equal(row.reachability_bucket, 'decided_below');
+  assert.equal(row.matrix_version, 'arb-matrix-v1');
+  assert.ok(typeof row.conflict_signature === 'string' && row.conflict_signature.length > 0);
+  assert.ok(['trend', 'range', 'breakout', 'event'].includes(row.regime));
+  assert.ok(row.reason && row.reason.length > 0);
   assert.equal(row.strike, 65135);
-  assert.ok(row.families.F7_distance_vs_time && row.families.F3_momentum);
+  assert.ok(row.families && typeof row.families === 'object'); // per-factor evidence vector
   assert.ok(row.half_spread != null);
   assert.equal(row.seconds_to_close_at_seal, 720);
 });

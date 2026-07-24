@@ -88,6 +88,9 @@ class CaptureWorker {
             if (ob.status !== 200) throw new Error(`orderbook HTTP ${ob.status}`);
             return normaliseOrderbook(ob.body);
           },
+          getMacroEvent: (now) => {
+            try { return macroFlag(new Date(now), this.macro).flag; } catch { return false; }
+          },
           logger: log,
           isReplay: false,
         })

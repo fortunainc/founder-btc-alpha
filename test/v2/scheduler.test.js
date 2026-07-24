@@ -50,7 +50,7 @@ test('seals exactly once at ~minute 3 and never re-seals; row is well-formed', a
   assert.equal(d.down_ask, 0.68);
   assert.equal(d.market_p, 0.32);              // (up_bid+up_ask)/2
   assert.equal(d.engine_id, 'btc-alpha-v2-scalp');
-  assert.equal(d.spec_version, 'v2.0.0');
+  assert.equal(d.spec_version, 'v2.1.0');
   assert.ok(['TAKE_YES', 'TAKE_NO', 'NO_TRADE'].includes(d.recommendation));
   // subsequent ticks (deeper into the window) must NOT re-seal
   now = T0 + 20_000;
