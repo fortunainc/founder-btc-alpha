@@ -30,11 +30,17 @@ import {
 } from './forecaster.js';
 import { runPreflight } from './preflight.js';
 import { startDashboard } from './dashboard.js';
+import { V2Scheduler } from './v2/scheduler.js';
 
 loadEnv();
 
 const SERIES = process.env.KALSHI_SERIES_TICKER || 'KXBTC15M';
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.CAPTURE_DRY_RUN === 'true';
+// BTC Alpha V2 shadow engine (btc-alpha-v2-scalp). DEFAULT OFF: when unset the worker
+// behaves EXACTLY as Phase-1 — the V2 scheduler is never constructed or called, so this
+// splice is provably inert until the env flag is deliberately turned on. Still shadow-only
+// (writes to fa_v2_decisions/grades; places no orders; emission_prod unaffected).
+const V2_SHADOW = process.env.V2_SHADOW_ENABLED === 'true';
 const MAX_WINDOWS = Number(
   (process.argv.find((a) => a.startsWith('--max-windows=')) || '').split('=')[1] || 0
 );
@@ -69,6 +75,23 @@ class CaptureWorker {
       seals_graded: 0,
     };
     this._timers = [];
+
+    // V2 shadow scheduler — only constructed when the flag is on. Injected deps only;
+    // it never touches Phase-1 state. getOrderbook THROWS on a bad book so a transient
+    // failure retries next tick rather than burning the window's single minute-3 seal.
+    this.v2 = V2_SHADOW
+      ? new V2Scheduler({
+          writeDecision: (row) => this.sink.writeV2Decision(row),
+          writeGrade: (row) => this.sink.writeV2Grade(row),
+          getOrderbook: async (windowId) => {
+            const ob = await this.kalshi.getOrderbook(windowId, 100);
+            if (ob.status !== 200) throw new Error(`orderbook HTTP ${ob.status}`);
+            return normaliseOrderbook(ob.body);
+          },
+          logger: log,
+          isReplay: false,
+        })
+      : null;
   }
 
   async start() {
@@ -228,6 +251,20 @@ class CaptureWorker {
       await this._snapshot(w, secondsToClose, inFinalPhase ? 'final120' : 'normal');
     }
 
+    // ---- V2 shadow (flagged): continuous bar feed + single minute-3 seal ----
+    // Wrapped so any V2 fault is isolated and can never disrupt Phase-1 capture.
+    if (this.v2) {
+      try {
+        await this.v2.onTick({
+          windows: [...this.windows.values()],
+          replicaIndex: this.replica.lastTick?.index ?? null,
+          now,
+        });
+      } catch (e) {
+        log.error(`v2 onTick failed (isolated): ${e.message}`);
+      }
+    }
+
     // Batched flush: at most one write per 5s, covering all windows.
     if (now - (this._lastFlushAt || 0) >= SNAPSHOT_MS && this.sink.pending > 0) {
       this._lastFlushAt = now;
@@ -378,6 +415,19 @@ class CaptureWorker {
     // Phase 1: score every sealed forecast for this window.
     if (row.outcome) {
       this.stats.seals_graded += await this._gradeSeals(w, row.outcome);
+    }
+
+    // V2 shadow (flagged): grade the one minute-3 decision. Isolated from Phase-1.
+    // Only grades resolved windows (yes/no); an unresolved settlement is left ungraded.
+    if (this.v2 && row.outcome) {
+      try {
+        await this.v2.onSettle(
+          { window_id: w.window_id },
+          { outcome: row.outcome, settlement_value: settlementValue, graded_at: Date.now() }
+        );
+      } catch (e) {
+        log.error(`v2 onSettle failed (isolated): ${e.message}`);
+      }
     }
 
     log.info(

@@ -19,6 +19,9 @@ const CAPTURE_TABLE = 'fa_window_capture';
 const SETTLEMENT_TABLE = 'fa_settlement_grade';
 const SEAL_TABLE = 'fa_forecast_seal';
 const GRADE_TABLE = 'fa_forecast_grade';
+// BTC Alpha V2 (btc-alpha-v2-scalp) — migration 005. Append-only, one seal + one grade per window.
+const V2_DECISION_TABLE = 'fa_v2_decisions';
+const V2_GRADE_TABLE = 'fa_v2_grades';
 
 /**
  * Above this many pending rows, or this many consecutive failures, the sink
@@ -169,6 +172,35 @@ class BaseSink {
       return { written: 0, error: err.message };
     }
   }
+
+  /**
+   * V2 (btc-alpha-v2-scalp): persist ONE immutable decision, returning its DB id
+   * (needed to FK the grade). Idempotent on (engine_id, window_id, is_replay) —
+   * a re-seal of the same window writes nothing and returns the existing id.
+   * INSERT-only, matching migration 005's UPDATE-less grant.
+   */
+  async writeV2Decision(row) {
+    try {
+      const id = await this._insertV2Decision(row);
+      return { written: 1, id };
+    } catch (err) {
+      this.stats.errors += 1;
+      this.logger.error?.(`[sink] v2 decision write failed: ${err.message}`);
+      return { written: 0, error: err.message };
+    }
+  }
+
+  /** V2: persist ONE grade. Idempotent on decision_id. */
+  async writeV2Grade(row) {
+    try {
+      await this._insertV2Grade(row);
+      return { written: 1 };
+    } catch (err) {
+      this.stats.errors += 1;
+      this.logger.error?.(`[sink] v2 grade write failed: ${err.message}`);
+      return { written: 0, error: err.message };
+    }
+  }
 }
 
 export class SupabaseSink extends BaseSink {
@@ -218,6 +250,35 @@ export class SupabaseSink extends BaseSink {
       .upsert(clean, { onConflict: conflictCols, ignoreDuplicates: true });
     if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
   }
+
+  async _insertV2Decision(row) {
+    const client = await this._ensureClient();
+    const { data, error } = await client
+      .from(V2_DECISION_TABLE)
+      .upsert([row], { onConflict: 'engine_id,window_id,is_replay', ignoreDuplicates: true })
+      .select('id');
+    if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
+    if (data && data.length) { this.stats.seals_written += 1; return data[0].id; }
+    // Conflict: this window is already sealed (e.g. a process restart). Return the existing id.
+    const { data: ex, error: e2 } = await client
+      .from(V2_DECISION_TABLE)
+      .select('id')
+      .eq('engine_id', row.engine_id)
+      .eq('window_id', row.window_id)
+      .eq('is_replay', row.is_replay)
+      .limit(1);
+    if (e2) throw new Error(`${e2.code || ''} ${e2.message}`.trim());
+    return ex?.[0]?.id ?? null;
+  }
+
+  async _insertV2Grade(row) {
+    const client = await this._ensureClient();
+    const { error } = await client
+      .from(V2_GRADE_TABLE)
+      .upsert([row], { onConflict: 'decision_id', ignoreDuplicates: true });
+    if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
+    this.stats.grades_written += 1;
+  }
 }
 
 export class DryRunSink extends BaseSink {
@@ -232,13 +293,26 @@ export class DryRunSink extends BaseSink {
       [SETTLEMENT_TABLE]: path.join(this.dir, `${SETTLEMENT_TABLE}-${stamp}.jsonl`),
       [SEAL_TABLE]: path.join(this.dir, `${SEAL_TABLE}-${stamp}.jsonl`),
       [GRADE_TABLE]: path.join(this.dir, `${GRADE_TABLE}-${stamp}.jsonl`),
+      [V2_DECISION_TABLE]: path.join(this.dir, `${V2_DECISION_TABLE}-${stamp}.jsonl`),
+      [V2_GRADE_TABLE]: path.join(this.dir, `${V2_GRADE_TABLE}-${stamp}.jsonl`),
     };
+    this._v2DecisionSeq = 0;
   }
 
   async _write(table, rows) {
     const file = this.files[table];
     const payload = rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
     await fs.promises.appendFile(file, payload, 'utf8');
+  }
+
+  async _insertV2Decision(row) {
+    const id = (this._v2DecisionSeq += 1); // synthetic id for local FK linkage
+    await this._write(V2_DECISION_TABLE, [{ id, ...row }]);
+    return id;
+  }
+
+  async _insertV2Grade(row) {
+    await this._write(V2_GRADE_TABLE, [row]);
   }
 }
 
@@ -260,4 +334,4 @@ export function sinkFromEnv({ logger = console, forceDryRun = false } = {}) {
   return new SupabaseSink({ url, serviceRoleKey: key, logger });
 }
 
-export { CAPTURE_TABLE, SETTLEMENT_TABLE, SEAL_TABLE, GRADE_TABLE };
+export { CAPTURE_TABLE, SETTLEMENT_TABLE, SEAL_TABLE, GRADE_TABLE, V2_DECISION_TABLE, V2_GRADE_TABLE };
