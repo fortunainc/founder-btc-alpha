@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   renderPage, timingSafeEqual, currentDecision, foundOutput, sampleQuality,
+  latestActionable, nextSealHint,
 } from '../src/dashboard.js';
 
 test('timingSafeEqual matches equal, rejects unequal and length-mismatch', () => {
@@ -173,6 +174,39 @@ test('data warnings surface instead of crashing when a view is absent', () => {
   });
   assert.match(html, /data warnings/);
   assert.match(html, /PGRST205/);
+});
+
+test('surfaces the most recent YES/NO signal even when the current window is NO TRADE', () => {
+  // Current window (CUR) latest seal is YES in SAMPLE; make it NO TRADE to prove
+  // the latest-actionable card still shows the last real call.
+  const noTradeCur = {
+    ...SAMPLE,
+    calls: [
+      { ...SAMPLE.calls[0], call: 'FAIR', divergence: 0.003, consensus_p: 0.778 }, // current -> NO TRADE
+      ...SAMPLE.calls.slice(1),
+    ],
+  };
+  const latest = latestActionable(noTradeCur);
+  assert.equal(latest.call, 'NO'); // the settled NO is the most recent actionable
+  const html = renderPage(noTradeCur);
+  assert.match(html, /Most recent YES \/ NO signal/);
+  assert.match(html, /class="badge d-no"[^>]*>TAKE NO</);
+  assert.match(html, /To paper-trade/);
+  assert.match(html, /buy <b>NO<\/b>/);
+});
+
+test('nextSealHint points at the next 10/5/2-minute seal', () => {
+  const iso = (min) => new Date(Date.now() + min * 60000).toISOString();
+  assert.equal(nextSealHint(iso(13)).mark, 10); // >10m out -> next seal is T-10
+  assert.equal(nextSealHint(iso(7)).mark, 5);   // between 5 and 10 -> T-5
+  assert.equal(nextSealHint(iso(3)).mark, 2);   // between 2 and 5 -> T-2
+  assert.equal(nextSealHint(iso(1)), null);     // past T-2 -> final call stands
+});
+
+test('latest-actionable shows a settled result once graded', () => {
+  const html = renderPage(SAMPLE); // SAMPLE's most recent actionable that is settled = NO correct
+  // Current window is YES (unsettled) so it is the latest actionable and shows "not graded yet".
+  assert.match(html, /Most recent YES \/ NO signal/);
 });
 
 test('never emits a token or key (render takes no secrets)', () => {

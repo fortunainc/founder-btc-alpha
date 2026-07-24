@@ -199,6 +199,41 @@ function timeRemaining(closeIso) {
   return `${secs}s`;
 }
 
+/** Next seal for the current window (seals fire at 10, 5, 2 min before close). */
+function nextSealHint(closeIso) {
+  if (!closeIso) return null;
+  const ms = new Date(closeIso).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const minsLeft = ms / 60000;
+  const next = [10, 5, 2].find((m) => m < minsLeft); // largest mark still ahead
+  if (next == null) return null; // past the final (T-2) seal — current call stands
+  const inMs = ms - next * 60000;
+  const m = Math.floor(inMs / 60000);
+  const s = Math.floor((inMs % 60000) / 1000);
+  return { mark: next, label: m >= 1 ? `${m} min ${s}s` : `${s}s` };
+}
+
+/**
+ * The most recent actionable (YES/NO) call across all loaded windows.
+ * Uses each window's LATEST seal only — an earlier YES/NO seal that a later
+ * seal superseded (e.g. to FAIR) is not a live signal and must not resurface.
+ */
+function latestActionable(data) {
+  const rows = data.calls || [];
+  if (!rows.length) return null;
+  const latestPerWindow = new Map();
+  for (const r of rows) {
+    const cur = latestPerWindow.get(r.window_id);
+    if (!cur || new Date(r.sealed_at).getTime() > new Date(cur.sealed_at).getTime()) {
+      latestPerWindow.set(r.window_id, r);
+    }
+  }
+  const actionable = [...latestPerWindow.values()].filter((r) => r.call === 'YES' || r.call === 'NO');
+  if (!actionable.length) return null;
+  return actionable.reduce((a, b) =>
+    (new Date(b.sealed_at).getTime() > new Date(a.sealed_at).getTime() ? b : a));
+}
+
 // ---------------------------------------------------------------------
 // Render helpers
 // ---------------------------------------------------------------------
@@ -220,6 +255,11 @@ function renderDecisionCard(data) {
       Earlier seals for this window are superseded — only this one is the current call.</p>`
     : `<p class="dline">${esc(out.line)}</p>`;
 
+  const ns = nextSealHint(d.closeIso);
+  const nextSealLine = ns
+    ? `<p class="seal-note">Next forecast seals about <b>${ns.mark} minutes before settlement</b> — in ~${esc(ns.label)}. A YES/NO only appears when TSM disagrees with the market by more than the fees + spread.</p>`
+    : '';
+
   return `
   <section class="card decision ${out.cls}">
     <div class="dhead">
@@ -237,9 +277,57 @@ function renderDecisionCard(data) {
       <span class="badge ${out.cls}">${esc(out.badge)}</span>
     </div>
     ${compare}
+    ${nextSealLine}
     <div class="trust">
       <span>Would this be allowed with real capital today?</span>
       <b>No — shadow mode only. The model has not passed the validation gate.</b>
+    </div>
+  </section>`;
+}
+
+/** The "most recent YES/NO signal" card — always shows the last real call to paper-trade. */
+function renderLatestActionable(data, curWindowId) {
+  const r = latestActionable(data);
+  if (!r) {
+    return `
+  <section class="card actionable d-flat">
+    <div class="dhead"><span class="dlabel">Most recent YES / NO signal</span></div>
+    <p class="dline" style="margin:8px 0 0">No actionable call yet — TSM hasn’t disagreed with the market by enough to clear fees. NO-TRADE windows don’t count.</p>
+  </section>`;
+  }
+  const isCur = r.window_id === curWindowId;
+  const cls = r.call === 'YES' ? 'd-yes' : 'd-no';
+  const agoMs = Date.now() - new Date(r.sealed_at).getTime();
+  const sealedAgo = agoMs < 3600000
+    ? `${Math.max(1, Math.round(agoMs / 60000))} min ago`
+    : fmtDateClock(r.sealed_at);
+  const settledMs = new Date(r.close_ts).getTime() - Date.now();
+  let status = settledMs > 0
+    ? `<span class="muted">settles ${fmtClock(r.close_ts)} PT — not graded yet</span>`
+    : '<span class="muted">awaiting settlement grade</span>';
+  if (r.outcome) {
+    status = r.call_correct
+      ? `<span class="pos">✓ correct — settled ${esc(r.outcome)}</span>`
+      : `<span class="neg">✗ wrong — settled ${esc(r.outcome)}</span>`;
+  }
+  const entryHint = r.call === 'YES'
+    ? `buy <b>YES</b> · market was ${pctYes(r.market_p)}`
+    : `buy <b>NO</b> · market was ${pctYes(1 - Number(r.market_p))}`;
+  return `
+  <section class="card actionable ${cls}">
+    <div class="dhead">
+      <span class="dlabel">Most recent YES / NO signal${isCur ? ' · this is the current window' : ''}</span>
+      <span class="badge ${cls}" style="font-size:16px;padding:4px 14px">TAKE ${esc(r.call)}</span>
+    </div>
+    <div class="facts">
+      <div class="fact"><span>Window settles</span><b>${fmtClock(r.close_ts)} PT</b></div>
+      <div class="fact"><span>Strike</span><b>${usd0(r.strike)}</b></div>
+      <div class="fact"><span>To paper-trade</span><b style="font-size:13px">${entryHint}</b></div>
+      <div class="fact"><span>Sealed</span><b style="font-size:12.5px">${sealPlain(r.seal_point)}<br><span class="muted">${esc(sealedAgo)}</span></b></div>
+    </div>
+    <div class="cmprow" style="border:0;padding:8px 2px 0">
+      <span>TSM ${pctYes(r.consensus_p)} vs market ${pctYes(r.market_p)} — disagreed by ${pctGap(r.divergence)}</span>
+      <span>${status}</span>
     </div>
   </section>`;
 }
@@ -421,6 +509,10 @@ function renderPage(data) {
   .decision.d-yes { border-color:#2ea043; box-shadow:0 0 0 1px #2ea04322, 0 8px 30px #2ea04315; }
   .decision.d-no  { border-color:#da3633; box-shadow:0 0 0 1px #da363322, 0 8px 30px #da363315; }
   .decision.d-flat{ border-color:#30363d; }
+  .actionable { margin-top:12px; }
+  .actionable.d-yes { border-color:#2ea043; }
+  .actionable.d-no  { border-color:#da3633; }
+  .actionable.d-flat{ border-color:#30363d; }
   .dhead { display:flex; justify-content:space-between; align-items:center; }
   .dlabel { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#8b949e; font-weight:700; }
   .mode-chip { font-size:11px; font-weight:700; letter-spacing:.06em; color:#f0c674; border:1px solid #8a6d00; background:#3d2d00; padding:1px 8px; border-radius:999px; }
@@ -493,6 +585,8 @@ function renderPage(data) {
   ${errBanner}
 
   ${renderDecisionCard(data)}
+
+  ${renderLatestActionable(data, currentDecision(data).windowId)}
 
   <h2>How this call type has performed</h2>
   <div class="scroll" style="padding:0">${renderAccuracy(data)}</div>
@@ -599,4 +693,7 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
   return server;
 }
 
-export { renderPage, loadData, timingSafeEqual, currentDecision, foundOutput, sampleQuality };
+export {
+  renderPage, loadData, timingSafeEqual, currentDecision, foundOutput,
+  sampleQuality, latestActionable, nextSealHint,
+};
