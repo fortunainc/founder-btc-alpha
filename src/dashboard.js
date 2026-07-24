@@ -176,6 +176,15 @@ async function loadData(client) {
   out.v2board = v2board.error ? [] : v2board.data;
   if (v2board.error) out.errors.v2board = `${v2board.error.code || ''} ${v2board.error.message}`.trim();
 
+  const live = await client
+    .from('fa_v2_decisions')
+    .select('engine_id,recommendation,status,reason,sealed_at,window_close_ts,strike,replica_index,up_ask,down_ask,evidence')
+    .eq('is_replay', false)
+    .order('sealed_at', { ascending: false })
+    .limit(12);
+  out.liveCalls = live.error ? [] : live.data;
+  if (live.error) out.errors.liveCalls = `${live.error.code || ''} ${live.error.message}`.trim();
+
   const pnl = await client
     .from('v_fa_paper_pnl')
     .select('seal_point,call,n_settled,n_wins,net_pnl,avg_pnl_per_trade,avg_entry_price,total_fees');
@@ -583,6 +592,47 @@ function renderBoard(rows) {
     <tbody>${body}</tbody></table>`;
 }
 
+function renderLiveEngineCalls(data) {
+  const rows = (data && data.liveCalls) || [];
+  const d = currentDecision(data);
+  const badge = (rec) => rec === 'TAKE_YES' ? { t: 'TAKE YES', c: 'd-yes' }
+    : rec === 'TAKE_NO' ? { t: 'TAKE NO', c: 'd-no' } : { t: 'NO TRADE', c: 'd-flat' };
+  const latestOf = (eng) => rows.find((r) => r.engine_id === eng) || null;
+
+  const rowB = (title, b, closeIso, sealedAt, extra) => {
+    const left = closeIso ? timeRemaining(closeIso) : null;
+    const ago = sealedAt ? minsAgo(sealedAt) : null;
+    const meta = [
+      closeIso ? `settles ${fmtClock(closeIso)} PT` : null,
+      left ? `${esc(left)} left` : null,
+      ago ? `sealed ${esc(ago)}` : null,
+      extra || null,
+    ].filter(Boolean).join(' · ');
+    return `<div class="lc-row"><span class="lc-eng">${esc(title)}</span><span class="badge ${b.c}">${esc(b.t)}</span><span class="lc-meta muted small">${esc('')}${meta}</span></div>`;
+  };
+
+  // Phase-1 forecast — the same mapping the hero uses.
+  const p1o = d.seal ? foundOutput(d.seal) : null;
+  const p1b = p1o ? { t: p1o.badge, c: p1o.cls } : { t: '—', c: 'd-flat' };
+  const p1row = rowB('Forecast · edge prob', p1b, d.closeIso, d.seal ? d.seal.sealed_at : null, null);
+
+  const edge = latestOf('btc-alpha-v2-scalp');
+  const prof = latestOf('btc-alpha-v2-profit');
+  const pev = prof && prof.evidence ? prof.evidence : null;
+  const pextra = pev && pev.chosen_ev != null
+    ? `EV $${Number(pev.chosen_ev).toFixed(3)}${pev.p_model != null ? ` · model ${(Number(pev.p_model) * 100).toFixed(0)}% YES` : ''}`
+    : (pev && pev.p_model != null ? `model ${(Number(pev.p_model) * 100).toFixed(0)}% YES` : null);
+
+  return `
+  <section class="card livecalls">
+    <div class="dhead"><span class="dlabel">Live TSM calls — this window</span><span class="mode-chip">SHADOW</span></div>
+    <p class="muted small">The current recommendation from each engine (newest seal). Forecast = edge probability · V2.1 = conviction · V2.2 = expected dollars after fees. Auto-refreshes every 10s.</p>
+    ${p1row}
+    ${rowB('V2.1 Arbiter · edge', badge(edge ? edge.recommendation : null), edge ? edge.window_close_ts : null, edge ? edge.sealed_at : null, null)}
+    ${rowB('V2.2 Profit · $ EV', badge(prof ? prof.recommendation : null), prof ? prof.window_close_ts : null, prof ? prof.sealed_at : null, pextra)}
+  </section>`;
+}
+
 function renderV2Panel(data) {
   const rows = (data && data.v2board) || [];
   if (!rows.length) return '';
@@ -695,6 +745,11 @@ function renderPage(data) {
   .badge.d-yes { color:#0d1117; background:#3fb950; }
   .badge.d-no  { color:#fff; background:#f85149; }
   .badge.d-flat{ color:#e6edf3; background:#30363d; }
+  .livecalls .lc-row { display:flex; align-items:center; gap:14px; padding:10px 0; border-top:1px solid #21262d; }
+  .livecalls p + .lc-row { border-top:0; }
+  .livecalls .lc-eng { flex:0 0 170px; font-weight:600; color:#e6edf3; }
+  .livecalls .lc-meta { flex:1; }
+  .livecalls .badge { font-size:15px; padding:4px 12px; }
   .cmp { margin:14px 0 6px; border-top:1px solid #21262d; }
   .cmprow { display:flex; justify-content:space-between; padding:7px 2px; border-bottom:1px solid #21262d; font-size:15px; }
   .cmprow span { color:#8b949e; }
@@ -754,6 +809,7 @@ function renderPage(data) {
   ${errBanner}
 
   ${renderDecisionCard(data)}
+  ${renderLiveEngineCalls(data)}
 
   ${renderLatestActionable(data, currentDecision(data).windowId)}
 
