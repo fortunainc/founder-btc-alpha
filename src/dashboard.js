@@ -104,6 +104,43 @@ function sampleQuality(nGraded) {
   return { label: 'Statistically validated', cls: 'q-ok' };
 }
 
+/**
+ * Hero confidence label. NEVER reads "Validated" in shadow mode — statistical
+ * validation is gated on the pre-registered Day-14 review, not on sample size
+ * alone. Driven purely by graded actionable-call count.
+ */
+function confidenceLabel(nGraded) {
+  const n = Number(nGraded) || 0;
+  if (n === 0) return { label: 'No calls graded yet', cls: 'q-muted' };
+  if (n < 50) return { label: 'Early research', cls: 'q-bad' };
+  if (n < 200) return { label: 'Building evidence', cls: 'q-warn' };
+  return { label: 'Strong sample · pending Day-14 gate', cls: 'q-ok' };
+}
+
+/** Human "N min ago" from an ISO timestamp. */
+function minsAgo(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  const m = Math.round(ms / 60000);
+  return m < 1 ? 'under a min ago' : `${m} min ago`;
+}
+
+/** Per-timing (10/5/2-min) actionable record, for the performance section. */
+function timingRecords(board) {
+  const meta = [
+    { sp: 'T-10', label: '10-minute forecasts' },
+    { sp: 'T-5', label: '5-minute forecasts' },
+    { sp: 'T-2', label: '2-minute forecasts' },
+  ];
+  return meta.map(({ sp, label }) => {
+    const rows = (board || []).filter((r) => r.seal_point === sp && (r.call === 'YES' || r.call === 'NO'));
+    const g = rows.reduce((s, r) => s + Number(r.n_graded || 0), 0);
+    const c = rows.reduce((s, r) => s + Number(r.n_correct || 0), 0);
+    return { label, graded: g, correct: c, pct: g ? Math.round((c / g) * 100) : null };
+  });
+}
+
 const CALL_COLORS = { YES: '#3fb950', NO: '#f85149', FAIR: '#58a6ff', THIN: '#8b949e' };
 
 /** Query the views the dashboard needs. Never throws — returns an errors map. */
@@ -138,6 +175,17 @@ async function loadData(client) {
     .select('seal_point,call,n_settled,n_wins,net_pnl,avg_pnl_per_trade,avg_entry_price,total_fees');
   out.pnl = pnl.error ? [] : pnl.data;
   if (pnl.error) out.errors.pnl = `${pnl.error.code || ''} ${pnl.error.message}`.trim();
+
+  // Every actionable (YES/NO) call that has SETTLED — the "outcome of each" feed.
+  const graded = await client
+    .from('v_fa_window_calls')
+    .select('window_id,seal_point,close_ts,strike,market_p,consensus_p,divergence,call,outcome,call_correct')
+    .in('call', ['YES', 'NO'])
+    .not('outcome', 'is', null)
+    .order('close_ts', { ascending: false })
+    .limit(60);
+  out.graded = graded.error ? [] : graded.data;
+  if (graded.error) out.errors.graded = `${graded.error.code || ''} ${graded.error.message}`.trim();
 
   return out;
 }
@@ -244,26 +292,30 @@ function renderDecisionCard(data) {
   const s = d.seal;
   const hasNums = s && s.consensus_p != null && s.market_p != null;
 
+  const conf = confidenceLabel(successRate(data.board).graded);
   const compare = hasNums ? `
     <div class="cmp">
-      <div class="cmprow"><span>Market says YES</span><b>${pctYes(s.market_p)}</b></div>
-      <div class="cmprow"><span>TSM says YES</span><b>${pctYes(s.consensus_p)}</b></div>
+      <div class="cmprow"><span>Market thinks YES</span><b>${pctYes(s.market_p)}</b></div>
+      <div class="cmprow"><span>TSM thinks YES</span><b>${pctYes(s.consensus_p)}</b></div>
       <div class="cmprow disagree"><span>TSM disagrees by</span><b>${pctGap(s.divergence)}</b></div>
+      <div class="cmprow"><span>Confidence</span><b><span class="qlabel ${conf.cls}">${esc(conf.label)}</span></b></div>
     </div>
-    <p class="dline">${esc(out.line)}</p>
-    <p class="seal-note">Based on the forecast sealed <b>${sealPlain(s.seal_point)}</b>.
-      Earlier seals for this window are superseded — only this one is the current call.</p>`
+    <p class="dline">${esc(out.line)}</p>`
     : `<p class="dline">${esc(out.line)}</p>`;
 
+  // Jargon-free basis + freshness (no T-10/T-5/T-2 on the decision surface).
+  const basisLine = s
+    ? `<p class="seal-note">Based on the latest forecast${minsAgo(s.sealed_at) ? ` · updated ${esc(minsAgo(s.sealed_at))}` : ''}. Older forecasts for this window are replaced automatically.</p>`
+    : '';
   const ns = nextSealHint(d.closeIso);
-  const nextSealLine = ns
-    ? `<p class="seal-note">Next forecast seals about <b>${ns.mark} minutes before settlement</b> — in ~${esc(ns.label)}. A YES/NO only appears when TSM disagrees with the market by more than the fees + spread.</p>`
+  const nextLine = ns
+    ? `<p class="seal-note">Next forecast in ~${esc(ns.label)}. A YES/NO only appears when TSM disagrees with the market by more than fees + spread.</p>`
     : '';
 
   return `
   <section class="card decision ${out.cls}">
     <div class="dhead">
-      <span class="dlabel">Current BTC window</span>
+      <span class="dlabel">Current BTC market</span>
       <span class="mode-chip">SHADOW</span>
     </div>
     <div class="facts">
@@ -273,11 +325,12 @@ function renderDecisionCard(data) {
       <div class="fact"><span>Time left</span><b>${esc(timeRemaining(d.closeIso))}</b></div>
     </div>
     <div class="verdict">
-      <span class="vsub">Shadow call</span>
+      <span class="vsub">Recommendation</span>
       <span class="badge ${out.cls}">${esc(out.badge)}</span>
     </div>
     ${compare}
-    ${nextSealLine}
+    ${basisLine}
+    ${nextLine}
     <div class="trust">
       <span>Would this be allowed with real capital today?</span>
       <b>No — shadow mode only. The model has not passed the validation gate.</b>
@@ -290,9 +343,9 @@ function renderLatestActionable(data, curWindowId) {
   const r = latestActionable(data);
   if (!r) {
     return `
-  <section class="card actionable d-flat">
-    <div class="dhead"><span class="dlabel">Most recent YES / NO signal</span></div>
-    <p class="dline" style="margin:8px 0 0">No actionable call yet — TSM hasn’t disagreed with the market by enough to clear fees. NO-TRADE windows don’t count.</p>
+  <section class="card actionable demoted">
+    <div class="dhead"><span class="dlabel small2">Last actionable signal — for paper-trading</span></div>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">No YES/NO signal yet — TSM hasn’t disagreed with the market by enough to clear fees. NO-TRADE windows don’t count.</p>
   </section>`;
   }
   const isCur = r.window_id === curWindowId;
@@ -314,10 +367,10 @@ function renderLatestActionable(data, curWindowId) {
     ? `buy <b>YES</b> · market was ${pctYes(r.market_p)}`
     : `buy <b>NO</b> · market was ${pctYes(1 - Number(r.market_p))}`;
   return `
-  <section class="card actionable ${cls}">
+  <section class="card actionable demoted">
     <div class="dhead">
-      <span class="dlabel">Most recent YES / NO signal${isCur ? ' · this is the current window' : ''}</span>
-      <span class="badge ${cls}" style="font-size:16px;padding:4px 14px">TAKE ${esc(r.call)}</span>
+      <span class="dlabel small2">Last actionable signal — for paper-trading ${isCur ? '· current window' : '· past window'}</span>
+      <span class="badge ${cls}" style="font-size:14px;padding:3px 12px">TAKE ${esc(r.call)}</span>
     </div>
     <div class="facts">
       <div class="fact"><span>Window settles</span><b>${fmtClock(r.close_ts)} PT</b></div>
@@ -400,6 +453,72 @@ function renderPnl(data) {
       <tbody>${body}</tbody></table>`;
 }
 
+/** Overall TSM success rate on actionable (YES/NO) calls, from the scoreboard. */
+function successRate(board) {
+  const act = (board || []).filter((r) => r.call === 'YES' || r.call === 'NO');
+  const sumG = (p) => act.filter(p).reduce((s, r) => s + Number(r.n_graded || 0), 0);
+  const sumC = (p) => act.filter(p).reduce((s, r) => s + Number(r.n_correct || 0), 0);
+  const g = sumG(() => true);
+  const c = sumC(() => true);
+  return {
+    graded: g, correct: c, pct: g ? Math.round((c / g) * 100) : null,
+    yesG: sumG((r) => r.call === 'YES'), yesC: sumC((r) => r.call === 'YES'),
+    noG: sumG((r) => r.call === 'NO'), noC: sumC((r) => r.call === 'NO'),
+  };
+}
+
+/**
+ * Performance section — the ONE place timing (10/5/2-min) lives. Overall success
+ * rate + per-timing records + the settled outcome of every actionable call.
+ * All percentages are actionable (YES/NO) only; FAIR/THIN are excluded because a
+ * FAIR "hit" measures the market's calibration, not TSM's.
+ */
+function renderPerformance(data) {
+  const sr = successRate(data.board);
+  const q = sampleQuality(sr.graded);
+
+  if (sr.graded === 0) {
+    return '<div class="card"><p class="muted">No actionable (YES/NO) calls have settled yet — performance begins once they grade.</p></div>';
+  }
+
+  const overall = `<div class="pnl-head">
+      <div><span class="pnl-l">Overall · YES/NO calls</span>
+        <span class="pnl-big">${sr.correct} of ${sr.graded}${sr.pct != null ? ` · ${sr.pct}%` : ''}</span></div>
+      <div class="pnl-sub">YES ${sr.yesC} of ${sr.yesG} right · NO ${sr.noC} of ${sr.noG} right ·
+        <span class="qlabel ${q.cls}">${esc(q.label)}</span><br>Actionable calls only — NO-TRADE/agree windows excluded. Correct ≠ profitable (see paper results).</div>
+    </div>`;
+
+  const cards = timingRecords(data.board).map((t) => `
+    <div class="hcell">
+      <span>${esc(t.label)}</span>
+      <b>${t.graded ? `${t.correct} of ${t.graded}${t.pct != null ? ` · ${t.pct}%` : ''}` : '<span class="muted">no graded calls</span>'}</b>
+    </div>`).join('');
+
+  const rows = data.graded || [];
+  const table = rows.length
+    ? `<div class="scroll" style="padding:0;margin-top:12px">
+        <p class="muted small" style="margin:0 0 6px">Outcome of every call TSM made, newest first:</p>
+        <table>
+          <thead><tr><th>settled (PT)</th><th>strike</th><th>call</th><th>TSM YES</th><th>mkt YES</th><th>outcome</th><th>result</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td class="mono small">${fmtDateClock(r.close_ts)}</td>
+            <td class="mono">${usd0(r.strike)}</td>
+            <td><span class="pill ${r.call}">${esc(r.call)}</span></td>
+            <td class="mono">${pctYes(r.consensus_p)}</td>
+            <td class="mono muted">${pctYes(r.market_p)}</td>
+            <td class="mono">settled ${esc(r.outcome)}</td>
+            <td>${r.call_correct ? '<span class="pos">✓ right</span>' : '<span class="neg">✗ wrong</span>'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+    : '';
+
+  return `<div class="card">
+      ${overall}
+      <div class="health" style="margin-top:6px">${cards}</div>
+      <p class="muted small" style="margin:10px 0 0">Per-timing samples are still small — treat these percentages as directional, not a ranking of which timing is "best."</p>
+      ${table}
+    </div>`;
+}
+
 /** Raw window-calls feed (research detail, collapsed). */
 function renderCallsTable(rows) {
   if (!rows.length) return '<p class="muted">No sealed windows yet.</p>';
@@ -466,6 +585,7 @@ function renderPage(data) {
     calls: data?.calls || [],
     board: data?.board || [],
     pnl: data?.pnl || [],
+    graded: data?.graded || [],
   };
   const now = Date.now();
   const aliveAgeS = data.latestCaptureTs
@@ -513,6 +633,9 @@ function renderPage(data) {
   .actionable.d-yes { border-color:#2ea043; }
   .actionable.d-no  { border-color:#da3633; }
   .actionable.d-flat{ border-color:#30363d; }
+  .actionable.demoted { border-color:#21262d; background:#0f141a; padding:14px; }
+  .actionable.demoted .fact { background:#0d1117; }
+  .dlabel.small2 { text-transform:none; font-size:12px; letter-spacing:.01em; font-weight:600; color:#8b949e; }
   .dhead { display:flex; justify-content:space-between; align-items:center; }
   .dlabel { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#8b949e; font-weight:700; }
   .mode-chip { font-size:11px; font-weight:700; letter-spacing:.06em; color:#f0c674; border:1px solid #8a6d00; background:#3d2d00; padding:1px 8px; border-radius:999px; }
@@ -588,8 +711,8 @@ function renderPage(data) {
 
   ${renderLatestActionable(data, currentDecision(data).windowId)}
 
-  <h2>How this call type has performed</h2>
-  <div class="scroll" style="padding:0">${renderAccuracy(data)}</div>
+  <h2>How has TSM performed?</h2>
+  ${renderPerformance(data)}
 
   <h2>Paper results — did it make money after costs?</h2>
   <div class="card">${renderPnl(data)}</div>
@@ -610,12 +733,12 @@ function renderPage(data) {
   </div>
 
   <h2>Research details</h2>
-  <details>
-    <summary>View research details — raw seals, gaps, and full scoreboard (T-10 = 10 min before settlement, T-5 = 5 min, T-2 = 2 min)</summary>
+  <details id="research">
+    <summary>Show research details — advanced only (the raw forecasts behind each recommendation)</summary>
     <div class="scroll">
-      <p class="muted small" style="margin-top:0">Every sealed forecast vs the market, newest first. "gap" = TSM YES minus market YES.</p>
+      <p class="muted small" style="margin-top:0">The recommendation always uses the <b>latest forecast</b> for each window; earlier forecasts (10, 5, and 2 minutes before settlement) are superseded automatically. Every sealed forecast vs the market, newest first — "gap" = TSM YES minus market YES.</p>
       ${renderCallsTable(data.calls)}
-      <p class="muted small">Cumulative scoreboard by call type:</p>
+      <p class="muted small">Cumulative scoreboard by forecast timing and side:</p>
       ${renderBoard(data.board)}
     </div>
   </details>
@@ -623,6 +746,19 @@ function renderPage(data) {
   <p class="foot">as of ${fmtClock(new Date().toISOString())} PT · auto-refreshes every 10s ·
     TAKE YES / TAKE NO = an actionable mispricing after fees · NO TRADE = agree, too small, or no forecast ·
     correct ≠ profitable — see paper results · shadow only until the Day-14 validation gate.</p>
+  <script>
+    // Keep the research panel's open/closed state across the 10s auto-refresh.
+    (function () {
+      try {
+        var d = document.getElementById('research');
+        if (!d) return;
+        if (localStorage.getItem('fa_research_open') === '1') d.open = true;
+        d.addEventListener('toggle', function () {
+          localStorage.setItem('fa_research_open', d.open ? '1' : '0');
+        });
+      } catch (e) { /* storage blocked — panel just won't persist */ }
+    })();
+  </script>
 </div></body></html>`;
 }
 
@@ -677,7 +813,7 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',
         'content-security-policy':
-          "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
       });
       res.end(html);
     } catch (err) {
@@ -695,5 +831,5 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
 
 export {
   renderPage, loadData, timingSafeEqual, currentDecision, foundOutput,
-  sampleQuality, latestActionable, nextSealHint,
+  sampleQuality, latestActionable, nextSealHint, successRate,
 };

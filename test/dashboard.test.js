@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   renderPage, timingSafeEqual, currentDecision, foundOutput, sampleQuality,
-  latestActionable, nextSealHint,
+  latestActionable, nextSealHint, successRate,
 } from '../src/dashboard.js';
 
 test('timingSafeEqual matches equal, rejects unequal and length-mismatch', () => {
@@ -53,6 +53,10 @@ const SAMPLE = {
     { seal_point: 'T-5', call: 'NO', n_settled: 5, n_wins: 4, net_pnl: -0.11, avg_pnl_per_trade: -0.022, avg_entry_price: 0.34, total_fees: 0.08 },
     { seal_point: 'T-5', call: 'YES', n_settled: 1, n_wins: 1, net_pnl: 0.18, avg_pnl_per_trade: 0.18, avg_entry_price: 0.79, total_fees: 0.02 },
   ],
+  graded: [
+    { window_id: 'KXBTC15M-26JUL242000-30', seal_point: 'T-5', close_ts: iso(-600000), strike: 65000, market_p: 0.395, consensus_p: 0.261, divergence: -0.134, call: 'NO', outcome: 'no', call_correct: true },
+    { window_id: 'KXBTC15M-26JUL241945-15', seal_point: 'T-2', close_ts: iso(-1200000), strike: 64950, market_p: 0.72, consensus_p: 0.86, divergence: 0.14, call: 'YES', outcome: 'no', call_correct: false },
+  ],
 };
 
 test('renders a single self-contained HTML document, no external subresources', () => {
@@ -88,13 +92,16 @@ test('FAIR and THIN translate to NO TRADE with a plain reason', () => {
 
 test('plain-English comparison replaces edge/divergence language', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /Market says YES/);
-  assert.match(html, /TSM says YES/);
+  assert.match(html, /Market thinks YES/);
+  assert.match(html, /TSM thinks YES/);
   assert.match(html, /TSM disagrees by/);
   assert.match(html, /77\.5%/);   // market
   assert.match(html, /87\.1%/);   // TSM
   assert.match(html, /9\.6%/);    // disagreement (percentage points, plain %)
-  assert.ok(!/divergence/i.test(html.split('View research details')[0]), 'no "divergence" on the primary surface');
+  assert.match(html, /Confidence/);
+  assert.ok(!/divergence/i.test(html.split('Show research details')[0]), 'no "divergence" on the primary surface');
+  // No seal jargon (T-10/T-5/T-2) on the decision surface, only in research/performance.
+  assert.ok(!/\bT-(?:10|5|2)\b/.test(html.split('How has TSM performed')[0]), 'no T-x jargon above the fold');
 });
 
 test('trust line states shadow / not-yet-allowed', () => {
@@ -102,13 +109,19 @@ test('trust line states shadow / not-yet-allowed', () => {
   assert.match(renderPage(SAMPLE), /No — shadow mode only/);
 });
 
-test('accuracy always shows numerator and denominator, plus a sample-quality label', () => {
+test('performance section shows overall + per-timing records (actionable only)', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /4 of 4 correct/);       // T-10 NO
-  assert.match(html, /1 of 1 correct/);       // T-5 YES (current type)
-  assert.match(html, /Too early to trust/);   // small graded n
-  // No bare "100%" without its counts adjacent.
-  assert.ok(/of \d+ correct<\/b><\/td>\s*<td[^>]*>100%/.test(html) || true);
+  assert.match(html, /How has TSM performed\?/);
+  assert.match(html, /Overall · YES\/NO calls/);
+  // Per-timing labels live here, NOT on the decision card.
+  assert.match(html, /10-minute forecasts/);
+  assert.match(html, /5-minute forecasts/);
+  assert.match(html, /2-minute forecasts/);
+  // T-10 actionable = NO 4/4 (THIN excluded) -> "4 of 4"
+  assert.match(html, /4 of 4/);
+  // Overall actionable = 4+4+1 correct of 4+5+1 graded = 9 of 10
+  assert.match(html, /9 of 10/);
+  assert.match(html, /excluded/); // FAIR/THIN excluded note
 });
 
 test('sample-quality labels scale with graded n', () => {
@@ -146,10 +159,10 @@ test('times render as a 12-hour clock (5pm), never 24-hour (17:00)', () => {
 
 test('research tables are present but collapsed under a details element', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /<details>/);
-  assert.match(html, /View research details/);
-  // Spells out T-10/T-5/T-2 for the founder.
-  assert.match(html, /10 min before settlement|10 minutes before settlement/);
+  assert.match(html, /<details id="research">/);
+  assert.match(html, /Show research details/);
+  // Timing lives in performance + research, spelled in plain words.
+  assert.match(html, /10, 5, and 2 minutes before settlement/);
 });
 
 test('capture-alive is green within 60s, red beyond, none when null', () => {
@@ -189,10 +202,12 @@ test('surfaces the most recent YES/NO signal even when the current window is NO 
   const latest = latestActionable(noTradeCur);
   assert.equal(latest.call, 'NO'); // the settled NO is the most recent actionable
   const html = renderPage(noTradeCur);
-  assert.match(html, /Most recent YES \/ NO signal/);
+  assert.match(html, /Last actionable signal — for paper-trading/);
   assert.match(html, /class="badge d-no"[^>]*>TAKE NO</);
   assert.match(html, /To paper-trade/);
   assert.match(html, /buy <b>NO<\/b>/);
+  // The hero (above the paper-trade card) shows NO TRADE, not the past NO.
+  assert.match(html.split('Last actionable signal')[0], /class="badge d-flat">NO TRADE</);
 });
 
 test('nextSealHint points at the next 10/5/2-minute seal', () => {
@@ -203,10 +218,42 @@ test('nextSealHint points at the next 10/5/2-minute seal', () => {
   assert.equal(nextSealHint(iso(1)), null);     // past T-2 -> final call stands
 });
 
-test('latest-actionable shows a settled result once graded', () => {
-  const html = renderPage(SAMPLE); // SAMPLE's most recent actionable that is settled = NO correct
-  // Current window is YES (unsettled) so it is the latest actionable and shows "not graded yet".
-  assert.match(html, /Most recent YES \/ NO signal/);
+test('latest-actionable card is present and demoted below the hero', () => {
+  const html = renderPage(SAMPLE);
+  assert.match(html, /Last actionable signal — for paper-trading/);
+  assert.match(html, /actionable demoted/); // visually demoted styling
+});
+
+test('successRate aggregates actionable YES/NO calls with a YES/NO split', () => {
+  const sr = successRate(SAMPLE.board);
+  // board: T-10 NO 4/4, T-5 NO 4/5, T-5 YES 1/... wait use actual SAMPLE board
+  assert.equal(sr.graded, SAMPLE.board.filter((r) => r.call === 'YES' || r.call === 'NO')
+    .reduce((s, r) => s + r.n_graded, 0));
+  assert.equal(sr.correct, SAMPLE.board.filter((r) => r.call === 'YES' || r.call === 'NO')
+    .reduce((s, r) => s + r.n_correct, 0));
+  assert.equal(sr.pct, Math.round((sr.correct / sr.graded) * 100));
+  assert.equal(sr.yesG + sr.noG, sr.graded);
+});
+
+test('renders an always-visible performance section with success rate + outcomes', () => {
+  const html = renderPage(SAMPLE);
+  assert.match(html, /Overall · YES\/NO calls/);
+  assert.match(html, /YES \d+ of \d+ right/); // YES/NO split
+  assert.match(html, /NO \d+ of \d+ right/);
+  // Outcome feed: each graded actionable call with its settled result.
+  assert.match(html, /settled no/);
+  assert.match(html, /✓ right/);
+  assert.match(html, /✗ wrong/);
+  // This section is NOT inside the collapsed <details>.
+  const beforeDetails = html.split('<details')[0];
+  assert.match(beforeDetails, /Overall · YES\/NO calls/);
+});
+
+test('research panel persists across the auto-refresh (id + script + CSP)', () => {
+  const html = renderPage(SAMPLE);
+  assert.match(html, /<details id="research">/);
+  assert.match(html, /fa_research_open/);          // persistence script present
+  assert.match(html, /addEventListener\('toggle'/);
 });
 
 test('never emits a token or key (render takes no secrets)', () => {
