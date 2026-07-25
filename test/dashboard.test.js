@@ -91,28 +91,26 @@ test('FAIR and THIN translate to NO TRADE with a plain reason', () => {
   assert.equal(foundOutput(null).badge, 'NO TRADE'); // no seal yet
 });
 
-test('plain-English comparison replaces edge/divergence language', () => {
+test('primary shows three independent engine cards, no edge/divergence jargon', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /Market thinks YES/);
-  assert.match(html, /TSM thinks YES/);
-  assert.match(html, /TSM disagrees by/);
-  assert.match(html, /77\.5%/);   // market
-  assert.match(html, /87\.1%/);   // TSM
-  assert.match(html, /9\.6%/);    // disagreement (percentage points, plain %)
-  assert.match(html, /Confidence/);
-  assert.ok(!/divergence/i.test(html.split('Show research details')[0]), 'no "divergence" on the primary surface');
-  // No seal jargon (T-10/T-5/T-2) on the decision surface, only in research/performance.
-  assert.ok(!/\bT-(?:10|5|2)\b/.test(html.split('How has TSM performed')[0]), 'no T-x jargon above the fold');
+  const primary = html.split('<details')[0];
+  assert.match(primary, /Forecast/);
+  assert.match(primary, /V2\.1 Arbiter/);
+  assert.match(primary, /V2\.2 Profit/);
+  assert.match(primary, /Accuracy measures correct settlement direction, not profitability/);
+  assert.ok(!/divergence/i.test(primary), 'no "divergence" on the primary surface');
+  assert.ok(!/\bT-(?:10|5|2)\b/.test(primary), 'no T-x jargon on the primary surface');
 });
 
-test('trust line states shadow / not-yet-allowed', () => {
-  assert.match(renderPage(SAMPLE), /Would this be allowed with real capital today\?/);
-  assert.match(renderPage(SAMPLE), /founder-only validation with no capital authority/);
+test('primary states founder-only / no capital / no orders', () => {
+  const html = renderPage(SAMPLE);
+  assert.match(html, /does not place orders/);
+  assert.match(html, /founder-only validation, not released to any user/);
 });
 
 test('performance section shows overall + per-timing records (actionable only)', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /How has TSM performed\?/);
+  assert.match(html, /Per-timing forecast performance/);
   assert.match(html, /Overall · YES\/NO calls/);
   // Per-timing labels live here, NOT on the decision card.
   assert.match(html, /10-minute forecasts/);
@@ -161,9 +159,7 @@ test('times render as a 12-hour clock (5pm), never 24-hour (17:00)', () => {
 test('research tables are present but collapsed under a details element', () => {
   const html = renderPage(SAMPLE);
   assert.match(html, /<details id="research">/);
-  assert.match(html, /Show research details/);
-  // Timing lives in performance + research, spelled in plain words.
-  assert.match(html, /10, 5, and 2 minutes before settlement/);
+  assert.match(html, /Technical details/);
 });
 
 test('capture-alive is green within 60s, red beyond, none when null', () => {
@@ -237,18 +233,35 @@ test('successRate aggregates actionable YES/NO calls with a YES/NO split', () =>
   assert.equal(sr.yesG + sr.noG, sr.graded);
 });
 
-test('renders an always-visible performance section with success rate + outcomes', () => {
+test('always-visible primary shows the three engines + a per-engine accuracy comparison table', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /Overall · YES\/NO calls/);
-  assert.match(html, /YES \d+ of \d+ right/); // YES/NO split
-  assert.match(html, /NO \d+ of \d+ right/);
-  // Outcome feed: each graded actionable call with its settled result.
-  assert.match(html, /settled no/);
-  assert.match(html, /✓ right/);
-  assert.match(html, /✗ wrong/);
-  // This section is NOT inside the collapsed <details>.
   const beforeDetails = html.split('<details')[0];
-  assert.match(beforeDetails, /Overall · YES\/NO calls/);
+  assert.match(beforeDetails, /Historical accuracy — each engine independently/);
+  assert.match(beforeDetails, /<table class="cmp-tbl">/);
+  assert.match(beforeDetails, /Forecast/);
+  assert.match(beforeDetails, /V2\.1 Arbiter/);
+  assert.match(beforeDetails, /V2\.2 Profit/);
+});
+
+test('per-engine accuracy: dedups Forecast to one canonical decision per window; excludes NO TRADE and replay', () => {
+  const data = { errors:{}, currentCapture:{window_id:'W', ts:new Date().toISOString(), reference_strike:64000, replica_index:64000, seconds_to_close:300},
+    calls:[], board:[], pnl:[], graded:[], liveCalls:[],
+    fcast:[
+      { window_id:'A', sealed_at:'2026-07-24T20:02:00Z', call:'NO',   call_correct:true  }, // latest for A -> counts
+      { window_id:'A', sealed_at:'2026-07-24T19:58:00Z', call:'YES',  call_correct:false }, // superseded
+      { window_id:'B', sealed_at:'2026-07-24T20:02:00Z', call:'THIN', call_correct:null  }, // latest for B non-actionable -> excluded
+      { window_id:'B', sealed_at:'2026-07-24T19:58:00Z', call:'YES',  call_correct:true  }, // superseded
+    ],
+    v2board:[
+      { engine_id:'btc-alpha-v2-scalp',  is_replay:false, decided_calls:10, calls_correct:6 },
+      { engine_id:'btc-alpha-v2-scalp',  is_replay:true,  decided_calls:99, calls_correct:99 }, // replay excluded
+      { engine_id:'btc-alpha-v2-profit', is_replay:false, decided_calls:0,  calls_correct:0 },
+    ],
+  };
+  const html = renderPage(data);
+  assert.match(html, /100% · 1\/1 settled calls/);   // Forecast: A only (NO right); B excluded
+  assert.match(html, /60% · 6\/10 settled calls/);    // V2.1: replay excluded
+  assert.match(html, /Not enough settled calls/);       // V2.2: 0 actionable
 });
 
 test('research panel persists across the auto-refresh (id + script + CSP)', () => {

@@ -173,7 +173,7 @@ async function loadData(client) {
 
   const v2board = await client
     .from('v_fa_v2_scoreboard')
-    .select('engine_id,day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
+    .select('engine_id,is_replay,day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
   out.v2board = v2board.error ? [] : v2board.data;
   if (v2board.error) out.errors.v2board = `${v2board.error.code || ''} ${v2board.error.message}`.trim();
 
@@ -202,6 +202,16 @@ async function loadData(client) {
     .limit(60);
   out.graded = graded.error ? [] : graded.data;
   if (graded.error) out.errors.graded = `${graded.error.code || ''} ${graded.error.message}`.trim();
+
+  // Canonical per-window Forecast accuracy input: ALL settled seals, newest first (dedup latest-per-window in JS).
+  const fcast = await client
+    .from('v_fa_window_calls')
+    .select('window_id,sealed_at,call,call_correct')
+    .not('outcome', 'is', null)
+    .order('sealed_at', { ascending: false })
+    .limit(1500);
+  out.fcast = fcast.error ? [] : fcast.data;
+  if (fcast.error) out.errors.fcast = `${fcast.error.code || ''} ${fcast.error.message}`.trim();
 
   return out;
 }
@@ -679,6 +689,81 @@ function renderV2Panel(data) {
   return edgeCard + profitCard;
 }
 
+function perEngineAccuracy(data) {
+  // Forecast: ONE canonical decision per window = the latest seal (T-2 supersedes T-5 supersedes T-10).
+  // Count only if that canonical seal is an actionable YES/NO that settled. data.fcast is settled seals, newest first.
+  const seen = new Set(); let fC = 0, fT = 0;
+  for (const r of (data.fcast || [])) {
+    if (seen.has(r.window_id)) continue;
+    seen.add(r.window_id);
+    if (r.call === 'YES' || r.call === 'NO') { fT++; if (r.call_correct) fC++; }
+  }
+  // V2 engines: v_fa_v2_scoreboard is already one graded decision per window per engine; decided_calls excludes NO_TRADE.
+  const agg = (eng) => (data.v2board || [])
+    .filter((r) => r.engine_id === eng && r.is_replay !== true)
+    .reduce((a, r) => ({ correct: a.correct + Number(r.calls_correct || 0), total: a.total + Number(r.decided_calls || 0) }), { correct: 0, total: 0 });
+  return { forecast: { correct: fC, total: fT }, v21: agg('btc-alpha-v2-scalp'), v22: agg('btc-alpha-v2-profit') };
+}
+
+const ENG_BADGE = (rec) => (rec === 'TAKE_YES' || rec === 'YES') ? { t: 'TAKE YES', c: 'd-yes' }
+  : (rec === 'TAKE_NO' || rec === 'NO') ? { t: 'TAKE NO', c: 'd-no' } : { t: 'NO TRADE', c: 'd-flat' };
+const ACC_STR = (a) => a.total > 0 ? `${Math.round((a.correct / a.total) * 100)}% · ${a.correct}/${a.total} settled calls` : 'Not enough settled calls';
+
+function renderMarketHeader(data) {
+  const d = currentDecision(data);
+  const win = d.windowId || (data.currentCapture && data.currentCapture.window_id) || '—';
+  return `
+  <section class="mkt">
+    <div class="dhead"><span class="dlabel">Current BTC market</span><span class="mode-chip">${esc(RESEARCH_CHIP)}</span></div>
+    <div class="facts">
+      <div class="fact"><span>Market</span><b style="font-size:13px">${esc(win)}</b></div>
+      <div class="fact"><span>Strike</span><b>${usd0(d.strike)}</b></div>
+      <div class="fact"><span>BTC now</span><b>${usd0(d.btcRef)}</b></div>
+      <div class="fact"><span>Settles</span><b>${d.closeIso ? fmtClock(d.closeIso) + ' PT' : '—'}</b></div>
+      <div class="fact"><span>Time left</span><b>${esc(timeRemaining(d.closeIso))}</b></div>
+    </div>
+  </section>`;
+}
+
+function renderEngineCards(data) {
+  const acc = perEngineAccuracy(data);
+  const d = currentDecision(data);
+  const latestOf = (eng) => (data.liveCalls || []).find((r) => r.engine_id === eng) || null;
+  const card = (name, b, closeIso, sealedAt, a) => {
+    const msLeft = closeIso ? (new Date(closeIso).getTime() - Date.now()) : null;
+    const left = msLeft == null ? '—' : (msLeft > 3000 ? esc(timeRemaining(closeIso)) : (msLeft > -90000 ? 'settling now' : 'settled'));
+    const sealed = sealedAt ? esc(minsAgo(sealedAt) || fmtClock(sealedAt)) : '—';
+    return `
+    <section class="ecard">
+      <div class="ecard-h"><span class="ecard-name">${esc(name)}</span><span class="badge ${b.c}">${esc(b.t)}</span></div>
+      <div class="ecard-facts">
+        <div><span>Sealed</span><b>${sealed}</b></div>
+        <div><span>Settles</span><b>${closeIso ? fmtClock(closeIso) + ' PT' : '—'}</b></div>
+        <div><span>Time left</span><b>${left}</b></div>
+        <div><span>Accuracy</span><b>${ACC_STR(a)}</b></div>
+      </div>
+    </section>`;
+  };
+  const p1o = foundOutput(d.seal);
+  const e21 = latestOf('btc-alpha-v2-scalp'), e22 = latestOf('btc-alpha-v2-profit');
+  return `
+  <div class="ecards">
+    ${card('Forecast', { t: p1o.badge, c: p1o.cls }, d.closeIso, d.seal ? d.seal.sealed_at : null, acc.forecast)}
+    ${card('V2.1 Arbiter', ENG_BADGE(e21 ? e21.recommendation : null), e21 ? e21.window_close_ts : d.closeIso, e21 ? e21.sealed_at : null, acc.v21)}
+    ${card('V2.2 Profit', ENG_BADGE(e22 ? e22.recommendation : null), e22 ? e22.window_close_ts : d.closeIso, e22 ? e22.sealed_at : null, acc.v22)}
+  </div>
+  <p class="muted small" style="text-align:center;margin:8px 0 0">Accuracy measures correct settlement direction, not profitability.</p>`;
+}
+
+function renderComparisonTable(data) {
+  const a = perEngineAccuracy(data);
+  const row = (n, x) => `<tr><td>${n}</td><td>${x.total > 0 ? x.correct : '—'}</td><td>${x.total > 0 ? x.total : '—'}</td><td>${x.total > 0 ? Math.round((x.correct / x.total) * 100) + '%' : 'Not enough settled calls'}</td></tr>`;
+  return `<table class="cmp-tbl"><thead><tr><th>Engine</th><th>Correct</th><th>Actionable calls</th><th>Accuracy</th></tr></thead><tbody>
+    ${row('Forecast', a.forecast)}
+    ${row('V2.1 Arbiter', a.v21)}
+    ${row('V2.2 Profit', a.v22)}</tbody></table>`;
+}
+
 function renderPage(data) {
   // Normalize so a partial data object (or a failed query) never throws.
   data = {
@@ -738,6 +823,20 @@ function renderPage(data) {
   .actionable.demoted { border-color:#21262d; background:#0f141a; padding:14px; }
   .actionable.demoted .fact { background:#0d1117; }
   .hist-badge { font-size:12px; font-weight:600; letter-spacing:.02em; color:#8b949e; border:1px solid #30363d; background:#161b22; padding:3px 10px; border-radius:8px; }
+  .mkt { background:#161b22; border:1px solid #21262d; border-radius:14px; padding:16px; margin-top:6px; }
+  .ecards { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px; }
+  @media (max-width:680px){ .ecards { grid-template-columns:1fr; } }
+  .ecard { background:#161b22; border:1px solid #21262d; border-radius:14px; padding:14px; }
+  .ecard-h { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+  .ecard-name { font-weight:700; font-size:14px; color:#e6edf3; }
+  .ecard .badge { font-size:14px; padding:4px 10px; }
+  .ecard-facts > div { display:flex; justify-content:space-between; gap:8px; padding:5px 0; border-top:1px solid #21262d; font-size:12.5px; }
+  .ecard-facts > div:first-child { border-top:0; }
+  .ecard-facts span { color:#8b949e; }
+  .ecard-facts b { color:#e6edf3; font-weight:600; text-align:right; }
+  .cmp-tbl { width:100%; border-collapse:collapse; margin-top:4px; }
+  .cmp-tbl th, .cmp-tbl td { border:1px solid #21262d; padding:8px 10px; text-align:left; font-size:13px; }
+  .cmp-tbl th { color:#8b949e; font-weight:600; background:#0f141a; }
   .dlabel.small2 { text-transform:none; font-size:12px; letter-spacing:.01em; font-weight:600; color:#8b949e; }
   .dhead { display:flex; justify-content:space-between; align-items:center; }
   .dlabel { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#8b949e; font-weight:700; }
@@ -815,48 +914,36 @@ function renderPage(data) {
   </header>
   ${errBanner}
 
-  ${renderDecisionCard(data)}
-  ${renderLiveEngineCalls(data)}
+  ${renderMarketHeader(data)}
+  ${renderEngineCards(data)}
 
-  ${renderLatestActionable(data, currentDecision(data).windowId)}
+  <h2>Historical accuracy — each engine independently</h2>
+  ${renderComparisonTable(data)}
+  <p class="muted small" style="margin:8px 0 0">Directional accuracy only — settled TAKE YES / TAKE NO recommendations, one canonical decision per window, NO TRADE excluded. Not a measure of profitability.</p>
 
-  <h2>How has TSM performed?</h2>
-  ${renderPerformance(data)}
-
-  <h2>Tracked hypothetical results — after-fee performance of resolved recommendations</h2>
-  <div class="card">${renderPnl(data)}</div>
-
-  <h2>How much can you trust this yet?</h2>
-  <div class="warn-box">
-    Early data. ${totalGraded} call${totalGraded === 1 ? '' : 's'} graded so far.
-    The Day-14 gate needs on the order of ~1,300 settled windows before any win rate is reliable —
-    treat everything above as directional, not proof. A good or bad morning is mostly noise at this size.
-  </div>
-
-  <h2>Experiment health</h2>
-  <div class="health">
-    <div class="hcell"><span>Data feed</span><b style="color:${aliveColor}">${esc(aliveText)}</b></div>
-    <div class="hcell"><span>Mode</span><b style="color:#f0c674">FOUNDER-ONLY · no capital authority</b></div>
-    <div class="hcell"><span>Settlement index</span><b>BRTI (settles) · TSM uses a public-exchange <span style="color:#f0c674">replica (proxy)</span></b></div>
-    <div class="hcell"><span>Windows sealed</span><b>${totalSealed}</b></div>
-    <div class="hcell"><span>Calls graded</span><b>${totalGraded}</b></div>
-  </div>
-
-  <h2>Research details</h2>
   <details id="research">
-    <summary>Show research details — advanced only (the raw forecasts behind each recommendation)</summary>
+    <summary>Technical details — advanced only</summary>
     <div class="scroll">
-      <p class="muted small" style="margin-top:0">The recommendation always uses the <b>latest forecast</b> for each window; earlier forecasts (10, 5, and 2 minutes before settlement) are superseded automatically. Every sealed forecast vs the market, newest first — "gap" = TSM YES minus market YES.</p>
+      ${renderLatestActionable(data, currentDecision(data).windowId)}
+      <h2>Per-timing forecast performance</h2>
+      ${renderPerformance(data)}
+      <h2>Tracked hypothetical after-fee results</h2>
+      <div class="card">${renderPnl(data)}</div>
+      <h2>Raw forecasts &amp; scoreboards</h2>
       ${renderCallsTable(data.calls)}
-      <p class="muted small">Cumulative scoreboard by forecast timing and side:</p>
       ${renderBoard(data.board)}
       ${renderV2Panel(data)}
+      <div class="health">
+        <div class="hcell"><span>Data feed</span><b style="color:${aliveColor}">${esc(aliveText)}</b></div>
+        <div class="hcell"><span>Mode</span><b style="color:#f0c674">FOUNDER-ONLY · no capital authority</b></div>
+        <div class="hcell"><span>Settlement index</span><b>BRTI (settles) · replica (proxy)</b></div>
+        <div class="hcell"><span>Windows sealed</span><b>${totalSealed}</b></div>
+        <div class="hcell"><span>Calls graded</span><b>${totalGraded}</b></div>
+      </div>
     </div>
   </details>
 
-  <p class="foot">as of ${fmtClock(new Date().toISOString())} PT · auto-refreshes every 10s ·
-    TAKE YES / TAKE NO = an actionable mispricing after fees · NO TRADE = agree, too small, or no forecast ·
-    correct ≠ profitable — see tracked results · founder-only validation, not released to any user.</p>
+  <p class="foot">as of ${fmtClock(new Date().toISOString())} PT · auto-refreshes every 10s · founder-only validation, not released to any user · TSM does not place orders or hold assets.</p>
   <script>
     // Keep the research panel's open/closed state across the 10s auto-refresh.
     (function () {
