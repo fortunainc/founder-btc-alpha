@@ -67,7 +67,8 @@ test('renders a single self-contained HTML document, no external subresources', 
 });
 
 test('shows the SHADOW banner prominently', () => {
-  assert.match(renderPage(SAMPLE), /SHADOW MODE/);
+  assert.match(renderPage(SAMPLE), /FOUNDER-ONLY RESEARCH/);
+  assert.match(renderPage(SAMPLE), /does not place orders/);
 });
 
 test('primary decision is exactly one of TAKE YES / TAKE NO / NO TRADE', () => {
@@ -106,7 +107,7 @@ test('plain-English comparison replaces edge/divergence language', () => {
 
 test('trust line states shadow / not-yet-allowed', () => {
   assert.match(renderPage(SAMPLE), /Would this be allowed with real capital today\?/);
-  assert.match(renderPage(SAMPLE), /No — shadow mode only/);
+  assert.match(renderPage(SAMPLE), /founder-only validation with no capital authority/);
 });
 
 test('performance section shows overall + per-timing records (actionable only)', () => {
@@ -135,7 +136,7 @@ test('sample-quality labels scale with graded n', () => {
 
 test('paper P&L is separate from call record and uses after-fee executable pricing', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /Net paper result after fees/);
+  assert.match(html, /After-fee hypothetical net \(tracked\)/);
   assert.match(html, /executable ask/);
   assert.match(html, /no midpoint fills/);
   // Net total of 1.28 - 0.11 + 0.18 = 1.35
@@ -202,12 +203,12 @@ test('surfaces the most recent YES/NO signal even when the current window is NO 
   const latest = latestActionable(noTradeCur);
   assert.equal(latest.call, 'NO'); // the settled NO is the most recent actionable
   const html = renderPage(noTradeCur);
-  assert.match(html, /Last actionable signal — for paper-trading/);
-  assert.match(html, /class="badge d-no"[^>]*>TAKE NO</);
-  assert.match(html, /To paper-trade/);
-  assert.match(html, /buy <b>NO<\/b>/);
+  assert.match(html, /Previous TSM Recommendation — Expired/);
+  assert.match(html, /hist-badge">TSM said TAKE NO/);
+  assert.match(html, /Observable executable ask/);
+  assert.match(html, /NO ask ≈ \d+¢/);
   // The hero (above the paper-trade card) shows NO TRADE, not the past NO.
-  assert.match(html.split('Last actionable signal')[0], /class="badge d-flat">NO TRADE</);
+  assert.match(html.split('Previous TSM Recommendation')[0], /class="badge d-flat">NO TRADE</);
 });
 
 test('nextSealHint points at the next 10/5/2-minute seal', () => {
@@ -220,8 +221,9 @@ test('nextSealHint points at the next 10/5/2-minute seal', () => {
 
 test('latest-actionable card is present and demoted below the hero', () => {
   const html = renderPage(SAMPLE);
-  assert.match(html, /Last actionable signal — for paper-trading/);
-  assert.match(html, /actionable demoted/); // visually demoted styling
+  assert.match(html, /Previous TSM Recommendation — Expired/);
+  assert.match(html, /actionable demoted/);
+  assert.match(html, /Historical — do not treat as current/); // visually demoted styling
 });
 
 test('successRate aggregates actionable YES/NO calls with a YES/NO split', () => {

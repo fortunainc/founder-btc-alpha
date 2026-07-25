@@ -27,6 +27,7 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { FOUNDER_BANNER, RESEARCH_CHIP } from './founder-mode.js';
 
 const PT = 'America/Los_Angeles';
 
@@ -331,7 +332,7 @@ function renderDecisionCard(data) {
   <section class="card decision ${out.cls}">
     <div class="dhead">
       <span class="dlabel">Current BTC market</span>
-      <span class="mode-chip">SHADOW</span>
+      <span class="mode-chip">${esc(RESEARCH_CHIP)}</span>
     </div>
     <div class="facts">
       <div class="fact"><span>Settles</span><b>${fmtClock(d.closeIso)} PT</b></div>
@@ -348,23 +349,22 @@ function renderDecisionCard(data) {
     ${nextLine}
     <div class="trust">
       <span>Would this be allowed with real capital today?</span>
-      <b>No — shadow mode only. The model has not passed the validation gate.</b>
+      <b>No — TSM is in founder-only validation with no capital authority and cannot place orders. Recommendations are tracked, not executed.</b>
     </div>
   </section>`;
 }
 
-/** The "most recent YES/NO signal" card — always shows the last real call to paper-trade. */
+/** Previous (expired) TSM recommendation — historical, visually subordinate, neutral styling. */
 function renderLatestActionable(data, curWindowId) {
   const r = latestActionable(data);
   if (!r) {
     return `
   <section class="card actionable demoted">
-    <div class="dhead"><span class="dlabel small2">Last actionable signal — for paper-trading</span></div>
-    <p class="muted" style="margin:8px 0 0;font-size:13px">No YES/NO signal yet — TSM hasn’t disagreed with the market by enough to clear fees. NO-TRADE windows don’t count.</p>
+    <div class="dhead"><span class="dlabel small2">Previous TSM Recommendation — Expired</span></div>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">Historical — do not treat as current. No prior YES/NO recommendation yet — TSM hasn’t disagreed with the market by enough to clear fees. NO-ACTION windows don’t count.</p>
   </section>`;
   }
   const isCur = r.window_id === curWindowId;
-  const cls = r.call === 'YES' ? 'd-yes' : 'd-no';
   const agoMs = Date.now() - new Date(r.sealed_at).getTime();
   const sealedAgo = agoMs < 3600000
     ? `${Math.max(1, Math.round(agoMs / 60000))} min ago`
@@ -378,20 +378,23 @@ function renderLatestActionable(data, curWindowId) {
       ? `<span class="pos">✓ correct — settled ${esc(r.outcome)}</span>`
       : `<span class="neg">✗ wrong — settled ${esc(r.outcome)}</span>`;
   }
-  const entryHint = r.call === 'YES'
-    ? `buy <b>YES</b> · market was ${pctYes(r.market_p)}`
-    : `buy <b>NO</b> · market was ${pctYes(1 - Number(r.market_p))}`;
+  // Observable EXECUTABLE ask used for grading (not the midpoint): ask = mid + half_spread on the taken side.
+  const hs = Number(r.half_spread), mid = Number(r.market_p);
+  const m = r.call === 'YES' ? mid : (1 - mid);
+  const askPct = Math.round((Number.isFinite(hs) ? m + hs : m) * 100);
+  const entryRef = `${esc(r.call)} ask ≈ ${askPct}¢${Number.isFinite(hs) ? '' : ' (mid; spread n/a)'}`;
   return `
   <section class="card actionable demoted">
     <div class="dhead">
-      <span class="dlabel small2">Last actionable signal — for paper-trading ${isCur ? '· current window' : '· past window'}</span>
-      <span class="badge ${cls}" style="font-size:14px;padding:3px 12px">TAKE ${esc(r.call)}</span>
+      <span class="dlabel small2">Previous TSM Recommendation — Expired ${isCur ? '· current window' : '· past window'}</span>
+      <span class="hist-badge">TSM said TAKE ${esc(r.call)} · expired</span>
     </div>
+    <p class="muted small" style="margin:2px 0 8px">Historical — do not treat as current.</p>
     <div class="facts">
       <div class="fact"><span>Window settles</span><b>${fmtClock(r.close_ts)} PT</b></div>
       <div class="fact"><span>Strike</span><b>${usd0(r.strike)}</b></div>
-      <div class="fact"><span>To paper-trade</span><b style="font-size:13px">${entryHint}</b></div>
-      <div class="fact"><span>Sealed</span><b style="font-size:12.5px">${sealPlain(r.seal_point)}<br><span class="muted">${esc(sealedAgo)}</span></b></div>
+      <div class="fact"><span>Observable executable ask (used for grading)</span><b style="font-size:13px">${entryRef}</b></div>
+      <div class="fact"><span>Recommended / sealed</span><b style="font-size:12.5px">${sealPlain(r.seal_point)}<br><span class="muted">${esc(sealedAgo)}</span></b></div>
     </div>
     <div class="cmprow" style="border:0;padding:8px 2px 0">
       <span>TSM ${pctYes(r.consensus_p)} vs market ${pctYes(r.market_p)} — disagreed by ${pctGap(r.divergence)}</span>
@@ -430,7 +433,7 @@ function renderAccuracy(data) {
     <thead><tr><th>Call timing</th><th>Side</th><th>Record</th><th>%</th><th>Sample quality</th></tr></thead>
     <tbody>${body}</tbody></table>
     <p class="muted small">Percentages are shown only next to their raw counts. A call being <em>correct</em>
-      is not the same as it being <em>profitable</em> — see paper results below.</p>`;
+      is not the same as it being <em>profitable</em> — see tracked results below.</p>`;
 }
 
 /** Paper P&L after Kalshi fees at executable ask prices (no midpoint fills). */
@@ -459,7 +462,7 @@ function renderPnl(data) {
 
   return `
     <div class="pnl-head">
-      <div><span class="pnl-l">Net paper result after fees</span>
+      <div><span class="pnl-l">After-fee hypothetical net (tracked)</span>
         <span class="pnl-big ${totalNet < 0 ? 'neg' : 'pos'}">${money(totalNet)}</span></div>
       <div class="pnl-sub">${totalWins} of ${totalN} trades won · 1 contract each · entered at the executable ask · Kalshi fee applied · no midpoint fills, no multi-level slippage modeled</div>
     </div>
@@ -500,7 +503,7 @@ function renderPerformance(data) {
       <div><span class="pnl-l">Overall · YES/NO calls</span>
         <span class="pnl-big">${sr.correct} of ${sr.graded}${sr.pct != null ? ` · ${sr.pct}%` : ''}</span></div>
       <div class="pnl-sub">YES ${sr.yesC} of ${sr.yesG} right · NO ${sr.noC} of ${sr.noG} right ·
-        <span class="qlabel ${q.cls}">${esc(q.label)}</span><br>Actionable calls only — NO-TRADE/agree windows excluded. Correct ≠ profitable (see paper results).</div>
+        <span class="qlabel ${q.cls}">${esc(q.label)}</span><br>Actionable calls only — NO-TRADE/agree windows excluded. Correct ≠ profitable (see tracked results).</div>
     </div>`;
 
   const cards = timingRecords(data.board).map((t) => `
@@ -628,7 +631,7 @@ function renderLiveEngineCalls(data) {
 
   return `
   <section class="card livecalls">
-    <div class="dhead"><span class="dlabel">Live TSM calls · latest per engine</span><span class="mode-chip">SHADOW</span></div>
+    <div class="dhead"><span class="dlabel">Live TSM calls · latest per engine</span><span class="mode-chip">${esc(RESEARCH_CHIP)}</span></div>
     <p class="muted small">The current recommendation from each engine (newest seal). Forecast = edge probability · V2.1 = conviction · V2.2 = expected dollars after fees. Engines seal once per window (~minute 3); the forecast re-seals through the window. Auto-refreshes every 10s.</p>
     ${p1row}
     ${rowB('V2.1 Arbiter · edge', badge(edge ? edge.recommendation : null), edge ? edge.window_close_ts : null, edge ? edge.sealed_at : null, null)}
@@ -660,7 +663,7 @@ function renderV2Panel(data) {
     <section class="card">
       <h2>V2.1 Arbiter — regime-based, picks by EDGE (shadow)</h2>
       <p class="muted small">Takes the side where the signal is strongest — where a mispricing may exist. Separate from the Phase-1 forecasts above; early sample.</p>
-      <p><strong>${edge.decided}</strong> decided calls · <strong>${edge.no_trades}</strong> no-trade · accuracy <strong>${acc(edge)}</strong> (${edge.correct}/${edge.decided}) · paper net <strong>${money(edge.net)}</strong> · ${edge.graded} graded windows</p>
+      <p><strong>${edge.decided}</strong> decided calls · <strong>${edge.no_trades}</strong> no-trade · accuracy <strong>${acc(edge)}</strong> (${edge.correct}/${edge.decided}) · after-fee tracked net <strong>${money(edge.net)}</strong> · ${edge.graded} graded windows</p>
     </section>`;
 
   if (!hasProfit) return edgeCard;
@@ -670,8 +673,8 @@ function renderV2Panel(data) {
     <section class="card">
       <h2>V2.2 Profit engine — picks by EXPECTED DOLLARS (shadow)</h2>
       <p class="muted small">Same windows, same forecast. Takes a side ONLY when its probability beats the executable ask + fees, and stands down on a strong-but-priced-in call. This is the "make money after costs" test.</p>
-      <p><strong>${profit.decided}</strong> trades taken · <strong>${profit.no_trades}</strong> stood down · accuracy <strong>${acc(profit)}</strong> (${profit.correct}/${profit.decided}) · paper net <strong>${money(profit.net)}</strong> · ${profit.graded} graded windows</p>
-      <p class="small">Head-to-head paper net on identical windows: profit ${money(profit.net)} vs edge ${money(edge.net)} — <strong>${lead >= 0 ? 'profit leads by ' : 'edge leads by '}$${Math.abs(lead).toFixed(2)}</strong>. Selectivity: profit takes ${profit.decided} vs edge ${edge.decided} of the same windows.</p>
+      <p><strong>${profit.decided}</strong> trades taken · <strong>${profit.no_trades}</strong> stood down · accuracy <strong>${acc(profit)}</strong> (${profit.correct}/${profit.decided}) · after-fee tracked net <strong>${money(profit.net)}</strong> · ${profit.graded} graded windows</p>
+      <p class="small">Head-to-head after-fee tracked net on identical windows: profit ${money(profit.net)} vs edge ${money(edge.net)} — <strong>${lead >= 0 ? 'profit leads by ' : 'edge leads by '}$${Math.abs(lead).toFixed(2)}</strong>. Selectivity: profit takes ${profit.decided} vs edge ${edge.decided} of the same windows.</p>
     </section>`;
   return edgeCard + profitCard;
 }
@@ -707,7 +710,7 @@ function renderPage(data) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="10">
-<title>Founder BTC Alpha — Shadow</title>
+<title>Founder BTC Alpha — Founder-Only Research</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -734,6 +737,7 @@ function renderPage(data) {
   .actionable.d-flat{ border-color:#30363d; }
   .actionable.demoted { border-color:#21262d; background:#0f141a; padding:14px; }
   .actionable.demoted .fact { background:#0d1117; }
+  .hist-badge { font-size:12px; font-weight:600; letter-spacing:.02em; color:#8b949e; border:1px solid #30363d; background:#161b22; padding:3px 10px; border-radius:8px; }
   .dlabel.small2 { text-transform:none; font-size:12px; letter-spacing:.01em; font-weight:600; color:#8b949e; }
   .dhead { display:flex; justify-content:space-between; align-items:center; }
   .dlabel { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#8b949e; font-weight:700; }
@@ -803,7 +807,7 @@ function renderPage(data) {
   .foot { color:#6e7681; font-size:11px; margin:26px 0 8px; text-align:center; line-height:1.7; }
 </style></head>
 <body><div class="wrap">
-  <div class="shadow">SHADOW MODE — research only · no orders · no capital · graded until the Day-14 gate</div>
+  <div class="shadow">${esc(FOUNDER_BANNER)}</div>
   <header>
     <h1>Founder BTC Alpha · 15-minute BTC markets</h1>
     <span class="alive"><span class="dot" style="color:${aliveColor};background:${aliveColor}"></span>
@@ -819,7 +823,7 @@ function renderPage(data) {
   <h2>How has TSM performed?</h2>
   ${renderPerformance(data)}
 
-  <h2>Paper results — did it make money after costs?</h2>
+  <h2>Tracked hypothetical results — after-fee performance of resolved recommendations</h2>
   <div class="card">${renderPnl(data)}</div>
 
   <h2>How much can you trust this yet?</h2>
@@ -832,7 +836,8 @@ function renderPage(data) {
   <h2>Experiment health</h2>
   <div class="health">
     <div class="hcell"><span>Data feed</span><b style="color:${aliveColor}">${esc(aliveText)}</b></div>
-    <div class="hcell"><span>Mode</span><b style="color:#f0c674">SHADOW · no capital</b></div>
+    <div class="hcell"><span>Mode</span><b style="color:#f0c674">FOUNDER-ONLY · no capital authority</b></div>
+    <div class="hcell"><span>Settlement index</span><b>BRTI (settles) · TSM uses a public-exchange <span style="color:#f0c674">replica (proxy)</span></b></div>
     <div class="hcell"><span>Windows sealed</span><b>${totalSealed}</b></div>
     <div class="hcell"><span>Calls graded</span><b>${totalGraded}</b></div>
   </div>
@@ -851,7 +856,7 @@ function renderPage(data) {
 
   <p class="foot">as of ${fmtClock(new Date().toISOString())} PT · auto-refreshes every 10s ·
     TAKE YES / TAKE NO = an actionable mispricing after fees · NO TRADE = agree, too small, or no forecast ·
-    correct ≠ profitable — see paper results · shadow only until the Day-14 validation gate.</p>
+    correct ≠ profitable — see tracked results · founder-only validation, not released to any user.</p>
   <script>
     // Keep the research panel's open/closed state across the 10s auto-refresh.
     (function () {
