@@ -173,13 +173,13 @@ async function loadData(client) {
 
   const v2board = await client
     .from('v_fa_v2_scoreboard')
-    .select('engine_id,is_replay,day,graded_windows,decided_calls,no_trades,calls_correct,call_accuracy,net_pnl_total');
+    .select('engine_id,spec_version,is_replay,day,graded_windows,decided_calls,no_trades,settled_actionable,calls_correct,call_accuracy,net_pnl_total');
   out.v2board = v2board.error ? [] : v2board.data;
   if (v2board.error) out.errors.v2board = `${v2board.error.code || ''} ${v2board.error.message}`.trim();
 
   const live = await client
     .from('fa_v2_decisions')
-    .select('engine_id,recommendation,status,reason,sealed_at,window_close_ts,strike,replica_index,up_ask,down_ask,evidence')
+    .select('engine_id,spec_version,recommendation,status,reason,sealed_at,window_close_ts,strike,replica_index,up_ask,down_ask,evidence')
     .eq('is_replay', false)
     .order('sealed_at', { ascending: false })
     .limit(12);
@@ -698,16 +698,28 @@ function perEngineAccuracy(data) {
     seen.add(r.window_id);
     if (r.call === 'YES' || r.call === 'NO') { fT++; if (r.call_correct) fC++; }
   }
-  // V2 engines: v_fa_v2_scoreboard is already one graded decision per window per engine; decided_calls excludes NO_TRADE.
-  const agg = (eng) => (data.v2board || [])
-    .filter((r) => r.engine_id === eng && r.is_replay !== true)
-    .reduce((a, r) => ({ correct: a.correct + Number(r.calls_correct || 0), total: a.total + Number(r.decided_calls || 0) }), { correct: 0, total: 0 });
-  return { forecast: { correct: fC, total: fT }, v21: agg('btc-alpha-v2-scalp'), v22: agg('btc-alpha-v2-profit') };
+  // V2 engines: ONE canonical decision per window per engine (UNIQUE engine_id+window_id+is_replay).
+  // Freeze policy: count ONLY the current frozen spec_version's prospective sample (a version change is a new
+  // challenger with a fresh sample). Denominator is settled_actionable (decided calls with a yes/no settlement)
+  // — NOT decided_calls — so an unpriceable-fill call is still graded on DIRECTION, never dropped or double-counted.
+  const curVer = {};
+  for (const r of (data.liveCalls || [])) { if (r && r.spec_version && !(r.engine_id in curVer)) curVer[r.engine_id] = r.spec_version; }
+  const agg = (eng) => {
+    const rows = (data.v2board || []).filter((r) => r.engine_id === eng && r.is_replay !== true);
+    let ver = curVer[eng];
+    if (!ver && rows.length) ver = rows.map((r) => r.spec_version).filter(Boolean).sort().pop(); // fallback: latest version present
+    return rows
+      .filter((r) => !ver || r.spec_version === ver)
+      .reduce((a, r) => ({ correct: a.correct + Number(r.calls_correct || 0), total: a.total + Number(r.settled_actionable || 0), version: ver }), { correct: 0, total: 0, version: ver || null });
+  };
+  return { forecast: { correct: fC, total: fT, version: 'v1' }, v21: agg('btc-alpha-v2-scalp'), v22: agg('btc-alpha-v2-profit') };
 }
 
 const ENG_BADGE = (rec) => (rec === 'TAKE_YES' || rec === 'YES') ? { t: 'TAKE YES', c: 'd-yes' }
   : (rec === 'TAKE_NO' || rec === 'NO') ? { t: 'TAKE NO', c: 'd-no' } : { t: 'NO TRADE', c: 'd-flat' };
 const ACC_STR = (a) => a.total > 0 ? `${Math.round((a.correct / a.total) * 100)}% · ${a.correct}/${a.total} settled calls` : 'Not enough settled calls';
+// Sample-status label per founder ruling (size of the settled actionable sample; never call the current sample 'meaningful').
+const sampleLabel = (total) => total < 50 ? 'EARLY SAMPLE' : total < 100 ? 'DATA CHECKPOINT' : total < 200 ? 'DIAGNOSTIC SAMPLE' : total < 500 ? 'INITIAL REVIEW SAMPLE' : 'MEANINGFUL MODEL SAMPLE';
 
 function renderMarketHeader(data) {
   const d = currentDecision(data);
@@ -741,6 +753,7 @@ function renderEngineCards(data) {
         <div><span>Settles</span><b>${closeIso ? fmtClock(closeIso) + ' PT' : '—'}</b></div>
         <div><span>Time left</span><b>${left}</b></div>
         <div><span>Accuracy</span><b>${ACC_STR(a)}</b></div>
+        <div><span>Sample</span><b>${esc(sampleLabel(a.total))}</b></div>
       </div>
     </section>`;
   };
@@ -752,7 +765,7 @@ function renderEngineCards(data) {
     ${card('V2.1 Arbiter', ENG_BADGE(e21 ? e21.recommendation : null), e21 ? e21.window_close_ts : d.closeIso, e21 ? e21.sealed_at : null, acc.v21)}
     ${card('V2.2 Profit', ENG_BADGE(e22 ? e22.recommendation : null), e22 ? e22.window_close_ts : d.closeIso, e22 ? e22.sealed_at : null, acc.v22)}
   </div>
-  <p class="muted small" style="text-align:center;margin:8px 0 0">Accuracy measures correct settlement direction, not profitability.</p>`;
+  <p class="muted small" style="text-align:center;margin:8px 0 0">Accuracy is calculated separately for each engine using one settled actionable recommendation per market window. NO TRADE is excluded. Accuracy does not establish profitability.</p>`;
 }
 
 function renderComparisonTable(data) {

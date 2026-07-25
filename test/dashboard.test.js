@@ -97,7 +97,7 @@ test('primary shows three independent engine cards, no edge/divergence jargon', 
   assert.match(primary, /Forecast/);
   assert.match(primary, /V2\.1 Arbiter/);
   assert.match(primary, /V2\.2 Profit/);
-  assert.match(primary, /Accuracy measures correct settlement direction, not profitability/);
+  assert.match(primary, /Accuracy is calculated separately for each engine using one settled actionable recommendation per market window\. NO TRADE is excluded\. Accuracy does not establish profitability/);
   assert.ok(!/divergence/i.test(primary), 'no "divergence" on the primary surface');
   assert.ok(!/\bT-(?:10|5|2)\b/.test(primary), 'no T-x jargon on the primary surface');
 });
@@ -243,9 +243,14 @@ test('always-visible primary shows the three engines + a per-engine accuracy com
   assert.match(beforeDetails, /V2\.2 Profit/);
 });
 
-test('per-engine accuracy: dedups Forecast to one canonical decision per window; excludes NO TRADE and replay', () => {
+test('per-engine accuracy: dedups Forecast to canonical/window; excludes NO TRADE, replay, and PRE-VERSION; denominator is settled_actionable', () => {
   const data = { errors:{}, currentCapture:{window_id:'W', ts:new Date().toISOString(), reference_strike:64000, replica_index:64000, seconds_to_close:300},
-    calls:[], board:[], pnl:[], graded:[], liveCalls:[],
+    calls:[], board:[], pnl:[], graded:[],
+    // liveCalls establishes the CURRENT frozen version per engine (newest live decision).
+    liveCalls:[
+      { engine_id:'btc-alpha-v2-scalp',  spec_version:'v2.1.0', recommendation:'TAKE_NO',  sealed_at:'2026-07-24T20:02:00Z' },
+      { engine_id:'btc-alpha-v2-profit', spec_version:'v2.2.0', recommendation:'TAKE_YES', sealed_at:'2026-07-24T20:02:00Z' },
+    ],
     fcast:[
       { window_id:'A', sealed_at:'2026-07-24T20:02:00Z', call:'NO',   call_correct:true  }, // latest for A -> counts
       { window_id:'A', sealed_at:'2026-07-24T19:58:00Z', call:'YES',  call_correct:false }, // superseded
@@ -253,15 +258,18 @@ test('per-engine accuracy: dedups Forecast to one canonical decision per window;
       { window_id:'B', sealed_at:'2026-07-24T19:58:00Z', call:'YES',  call_correct:true  }, // superseded
     ],
     v2board:[
-      { engine_id:'btc-alpha-v2-scalp',  is_replay:false, decided_calls:10, calls_correct:6 },
-      { engine_id:'btc-alpha-v2-scalp',  is_replay:true,  decided_calls:99, calls_correct:99 }, // replay excluded
-      { engine_id:'btc-alpha-v2-profit', is_replay:false, decided_calls:0,  calls_correct:0 },
+      { engine_id:'btc-alpha-v2-scalp',  spec_version:'v2.1.0', is_replay:false, decided_calls:12, settled_actionable:10, calls_correct:6 },
+      { engine_id:'btc-alpha-v2-scalp',  spec_version:'v2.0.0', is_replay:false, decided_calls:5,  settled_actionable:5,  calls_correct:4 }, // PRE-VERSION -> excluded
+      { engine_id:'btc-alpha-v2-scalp',  spec_version:'v2.1.0', is_replay:true,  decided_calls:99, settled_actionable:99, calls_correct:99 }, // replay excluded
+      { engine_id:'btc-alpha-v2-profit', spec_version:'v2.2.0', is_replay:false, decided_calls:3,  settled_actionable:0,  calls_correct:0 },  // 0 settled actionable
     ],
   };
   const html = renderPage(data);
   assert.match(html, /100% · 1\/1 settled calls/);   // Forecast: A only (NO right); B excluded
-  assert.match(html, /60% · 6\/10 settled calls/);    // V2.1: replay excluded
-  assert.match(html, /Not enough settled calls/);       // V2.2: 0 actionable
+  assert.match(html, /60% · 6\/10 settled calls/);    // V2.1: current version only (v2.0.0 excluded -> NOT 10/15), replay excluded, settled_actionable denominator
+  assert.ok(!html.includes('6/15') && !html.includes('10/15')); // pre-version must NOT be folded in
+  assert.match(html, /Not enough settled calls/);       // V2.2: 0 settled actionable
+  assert.match(html, /EARLY SAMPLE/);                    // sample-status label present for a <50 sample
 });
 
 test('research panel persists across the auto-refresh (id + script + CSP)', () => {

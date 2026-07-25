@@ -121,38 +121,53 @@ REVOKE ALL ON founder_alpha.fa_v2_grades     FROM anon, authenticated;
 -- paper P&L after fees. Accuracy and profitability are kept SEPARATE, and
 -- NO_TRADE is reported as its own honest volume, never folded into accuracy.
 -- =====================================================================
-CREATE OR REPLACE VIEW founder_alpha.v_fa_v2_scoreboard AS
+-- CORRECTNESS FIX (founder BTC accuracy audit 2026-07-25):
+--   (1) spec_version exposed + in GROUP BY  -> consumers count ONLY the current frozen
+--       version's prospective sample; a version change is a new challenger with a new sample.
+--   (2) directional correctness DERIVED from the settled outcome (correct_dir), independent of
+--       fill priceability -> an unpriceable-ask actionable call is still graded on DIRECTION
+--       (TAKE_NO that settled 'yes' = wrong), never nulled/dropped as before.
+--   (3) settled_actionable = decided calls WITH a yes/no settlement = the accuracy denominator
+--       (replaces decided_calls, which wrongly counted unsettled/void decided calls).
+-- Column order changed, so DROP + CREATE (CREATE OR REPLACE cannot reorder columns).
+DROP VIEW IF EXISTS founder_alpha.v_fa_v2_scoreboard;
+CREATE VIEW founder_alpha.v_fa_v2_scoreboard AS
 WITH joined AS (
   SELECT
     d.engine_id,
+    d.spec_version,
     (g.graded_at AT TIME ZONE 'UTC')::date        AS day,
     d.recommendation,
     d.is_replay,
     g.settled_outcome,
-    g.call_correct,
+    CASE
+      WHEN d.recommendation = 'TAKE_YES' AND g.settled_outcome = 'yes' THEN true
+      WHEN d.recommendation = 'TAKE_NO'  AND g.settled_outcome = 'no'  THEN true
+      WHEN d.recommendation IN ('TAKE_YES','TAKE_NO') AND g.settled_outcome IN ('yes','no') THEN false
+      ELSE NULL
+    END                                           AS correct_dir,
     g.net_pnl
   FROM founder_alpha.fa_v2_grades g
   JOIN founder_alpha.fa_v2_decisions d ON d.id = g.decision_id
 )
 SELECT
   engine_id,
+  spec_version,
   day,
   is_replay,
   count(*)                                                          AS graded_windows,
   count(*) FILTER (WHERE recommendation <> 'NO_TRADE')              AS decided_calls,
   count(*) FILTER (WHERE recommendation = 'NO_TRADE')               AS no_trades,
-  count(*) FILTER (WHERE call_correct IS TRUE)                      AS calls_correct,
-  -- accuracy over DECIDED calls only (numerator/denominator kept explicit)
+  count(*) FILTER (WHERE recommendation <> 'NO_TRADE' AND correct_dir IS NOT NULL) AS settled_actionable,
+  count(*) FILTER (WHERE correct_dir IS TRUE)                       AS calls_correct,
   round(
-    count(*) FILTER (WHERE call_correct IS TRUE)::numeric
-    / NULLIF(count(*) FILTER (WHERE call_correct IS NOT NULL), 0), 4
+    count(*) FILTER (WHERE correct_dir IS TRUE)::numeric
+    / NULLIF(count(*) FILTER (WHERE recommendation <> 'NO_TRADE' AND correct_dir IS NOT NULL), 0), 4
   )                                                                 AS call_accuracy,
-  count(*) FILTER (WHERE call_correct IS NOT NULL)                  AS graded_decided_calls,
-  -- paper P&L kept SEPARATE from accuracy; only priceable fills contribute
   round(sum(net_pnl) FILTER (WHERE net_pnl IS NOT NULL)::numeric, 4) AS net_pnl_total,
   count(*) FILTER (WHERE net_pnl IS NOT NULL AND recommendation <> 'NO_TRADE') AS priced_fills
 FROM joined
-GROUP BY engine_id, day, is_replay;
+GROUP BY engine_id, spec_version, day, is_replay;
 
 COMMENT ON VIEW founder_alpha.v_fa_v2_scoreboard IS
   'Per-day V2 read-out. call_accuracy is over graded decided calls only (NO_TRADE excluded); no_trades reported separately as abstention volume. net_pnl_total is paper P&L after Kalshi fees at sealed executable asks, kept distinct from accuracy. Live and replay streams separated by is_replay.';
