@@ -61,6 +61,9 @@ export class V2Scheduler {
   /** Feed one replica tick into the continuous buffer. */
   ingestTick(ts, price) { this.bars.add(ts, price); }
 
+  /** Seed the bar buffer from historical points (boot backfill) so vol is warm immediately after a restart. */
+  seedHistory(points) { return this.bars.seed(points); }
+
   secondsToClose(w, now) { return Math.round((new Date(w.close_time).getTime() - now) / 1000); }
 
   /**

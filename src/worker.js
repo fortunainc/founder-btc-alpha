@@ -107,6 +107,33 @@ class CaptureWorker {
       : null;
   }
 
+  /**
+   * BTC-2 fix: warm-start the v2 bar buffer from recent public exchange candles so realized vol is available
+   * immediately after a redeploy, instead of ~15 min of live-tick warmup during which the arbiter/profit engines
+   * emit no_forecast_data. Coinbase 1-min closes are an approximation used ONLY to prime the vol buffer; live
+   * replica ticks take over as they arrive. Non-fatal: on any failure the buffer just warms the old way.
+   */
+  async backfillBars() {
+    if (!this.v2) return;
+    try {
+      const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60', {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'founder-btc-alpha' },
+      });
+      if (!res.ok) throw new Error(`candles HTTP ${res.status}`);
+      const rows = await res.json(); // [[time, low, high, open, close, volume], ...] newest-first
+      if (!Array.isArray(rows)) throw new Error('unexpected candles shape');
+      const points = rows
+        .filter((r) => Array.isArray(r) && r.length >= 5)
+        .map((r) => ({ ts: Number(r[0]) * 1000, price: Number(r[4]) }))
+        .filter((pt) => Number.isFinite(pt.ts) && Number.isFinite(pt.price) && pt.price > 0);
+      const seeded = this.v2.seedHistory(points);
+      log.info(`[v2] bar buffer warm-started from ${seeded} candle closes (avoids the ~15-min post-deploy blind window)`);
+    } catch (e) {
+      log.warn(`[v2] bar backfill skipped (${e.message}); buffer will warm from live ticks over ~15 min`);
+    }
+  }
+
   async start() {
     log.info(`=== Founder BTC Alpha capture worker ===`);
     log.info(`series=${SERIES} sink=${this.sink.mode} replica=${REPLICA_METHODOLOGY_VERSION}`);
@@ -118,6 +145,7 @@ class CaptureWorker {
     this.replica.on('venue-reconnect', (v, reason, delay) =>
       log.warn(`replica venue ${v} reconnecting in ${delay}ms (${reason})`)
     );
+    if (this.v2) await this.backfillBars(); // warm-start vol before live ticks arrive
     this.replica.start();
 
     // V2 shadow: start the public trade feeds that fill the order-flow tape.

@@ -30,6 +30,23 @@ export class BarBuilder {
     this._evict(ts);
   }
 
+  /**
+   * Seed the buffer with HISTORICAL points (e.g. exchange candle closes fetched at boot) so realized vol is
+   * available immediately after a redeploy instead of 15 min later. Points are sorted ascending and ingested
+   * through add() (monotonic guard + eviction apply). Must be called BEFORE live ticks arrive (older points
+   * would otherwise be rejected as out-of-order). Idempotent-safe: re-seeding only adds newer points.
+   * @param {{ts:number, price:number}[]} points
+   */
+  seed(points = []) {
+    if (!Array.isArray(points)) return 0;
+    const sorted = points
+      .filter((p) => p && Number.isFinite(p.ts) && Number.isFinite(p.price) && p.price > 0)
+      .sort((a, b) => a.ts - b.ts);
+    let n = 0;
+    for (const p of sorted) { const before = this.ticks.length; this.add(p.ts, p.price); if (this.ticks.length > before) n += 1; }
+    return n;
+  }
+
   _evict(now) {
     const cutoff = now - this.maxAgeMs;
     let i = 0;
