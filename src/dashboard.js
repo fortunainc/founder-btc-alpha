@@ -28,6 +28,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { FOUNDER_BANNER, RESEARCH_CHIP } from './founder-mode.js';
+import { loadValidationData, buildValidationModel, buildInspectorRows, renderValidation } from './validation.js';
 
 const PT = 'America/Los_Angeles';
 
@@ -147,6 +148,18 @@ const CALL_COLORS = { YES: '#3fb950', NO: '#f85149', FAIR: '#58a6ff', THIN: '#8b
 /** Query the views the dashboard needs. Never throws — returns an errors map. */
 async function loadData(client) {
   const out = { errors: {} };
+
+  // Three-approach validation layer (founder directive 2026-07-26). Loaded first,
+  // isolated: a failure here renders a loud error section, never a silent absence.
+  try {
+    const vd = await loadValidationData(client);
+    out.validationModel = buildValidationModel(vd);
+    out.validationRows = buildInspectorRows(vd, out.validationModel);
+  } catch (e) {
+    out.validationModel = null;
+    out.validationRows = null;
+    out.errors.validation = e.message;
+  }
 
   const cap = await client
     .from('fa_window_capture')
@@ -946,6 +959,10 @@ function renderPage(data) {
       ${renderCallsTable(data.calls)}
       ${renderBoard(data.board)}
       ${renderV2Panel(data)}
+      <h2 id="validation">Three-approach validation — Forecast · V2.1 Arbiter · V2.2 Profit</h2>
+      ${data.validationModel
+        ? renderValidation(data.validationModel, data.validationRows)
+        : `<section class="card"><h2>⚠ VALIDATION LAYER FAILED TO LOAD</h2><p>${esc(data.errors.validation || 'unknown error')} — the comparison metrics are unavailable; the rest of this page is unaffected. Do not treat partial numbers as complete.</p></section>`}
       <div class="health">
         <div class="hcell"><span>Data feed</span><b style="color:${aliveColor}">${esc(aliveText)}</b></div>
         <div class="hcell"><span>Mode</span><b style="color:#f0c674">FOUNDER-ONLY · no capital authority</b></div>

@@ -91,6 +91,20 @@ class CaptureWorker {
       ? new V2Scheduler({
           writeDecision: (row) => this.sink.writeV2Decision(row),
           writeGrade: (row) => this.sink.writeV2Grade(row),
+          // AUDIT FIX (2026-07-26, grade 57): grade from the STORED seal, never memory.
+          readDecision: async (windowId, engineId) => {
+            if (this.sink.mode !== 'supabase') return null;
+            const client = await this.sink._ensureClient();
+            const { data, error } = await client
+              .from('fa_v2_decisions')
+              .select('*')
+              .eq('window_id', windowId)
+              .eq('engine_id', engineId)
+              .order('id', { ascending: true })
+              .limit(1);
+            if (error) throw new Error(error.message);
+            return data && data.length ? data[0] : null;
+          },
           withProfitEngine: V2_PROFIT,
           getOrderbook: async (windowId) => {
             const ob = await this.kalshi.getOrderbook(windowId, 100);

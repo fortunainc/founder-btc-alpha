@@ -37,9 +37,15 @@ export class V2Scheduler {
    * @param {boolean} [deps.isReplay]
    * @param {number} [deps.sealTauSec]
    */
-  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, getTradeTape, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC, withProfitEngine = false } = {}) {
+  constructor({ writeDecision, writeGrade, getOrderbook, getMacroEvent, getTradeTape, readDecision = null, logger = console, isReplay = false, sealTauSec = SEAL_TAU_SEC, withProfitEngine = false } = {}) {
     this.writeDecision = writeDecision;
     this.writeGrade = writeGrade;
+    // readDecision(windowId, engineId) -> stored decision row or null.
+    // AUDIT FIX (2026-07-26, grade 57): grading MUST price from the STORED seal,
+    // not the in-memory object — a transient write-retry can reseal in memory with
+    // a fresher book while the DB keeps the first (canonical) row. When a reader is
+    // provided, onSettle grades the stored row; memory is only a fallback.
+    this.readDecision = typeof readDecision === 'function' ? readDecision : null;
     this.getOrderbook = getOrderbook;
     this.getMacroEvent = typeof getMacroEvent === 'function' ? getMacroEvent : () => false;
     this.getTradeTape = typeof getTradeTape === 'function' ? getTradeTape : () => null;
@@ -154,25 +160,51 @@ export class V2Scheduler {
    * @param {object} w { window_id }
    * @param {object} settlement { outcome:'yes'|'no'|'void', settlement_value?, graded_at }
    */
+  /** Prefer the STORED decision row over the in-memory one (audit fix, grade 57). */
+  async _canonicalDecision(windowId, engineId, memoryDecision, memoryId) {
+    if (this.readDecision) {
+      try {
+        const stored = await this.readDecision(windowId, engineId);
+        if (stored) {
+          const num = (v) => (v == null ? null : Number(v));
+          return {
+            decision: {
+              ...stored,
+              up_ask: num(stored.up_ask), down_ask: num(stored.down_ask),
+              up_bid: num(stored.up_bid), down_bid: num(stored.down_bid),
+            },
+            decisionId: stored.id ?? memoryId ?? null,
+            source: 'stored',
+          };
+        }
+      } catch (e) {
+        this.logger.warn?.(`[v2] readDecision ${windowId}/${engineId} failed (${e.message}); falling back to memory`);
+      }
+    }
+    return { decision: memoryDecision, decisionId: memoryId ?? null, source: 'memory' };
+  }
+
   async onSettle(w, settlement) {
     const st = this._state(w.window_id);
     if (!st.sealed || !st.decision) { this.logger.warn?.(`[v2] settle ${w.window_id}: no sealed decision to grade`); return { graded: 0 }; }
     if (st.graded) return { graded: 0 };
 
-    const grade = gradeDecision(st.decision, settlement);
-    if (st.decisionId != null) grade.decision_id = st.decisionId; // FK link when the DB id is known
+    const canon = await this._canonicalDecision(w.window_id, st.decision.engine_id, st.decision, st.decisionId);
+    const grade = gradeDecision(canon.decision, settlement);
+    if (canon.decisionId != null) grade.decision_id = canon.decisionId; // FK link when the DB id is known
     const res = await this.writeGrade(grade);
     st.graded = true;
-    this.logger.info?.(`[v2] GRADE ${w.window_id} ${st.decision.recommendation}/${settlement.outcome} → net=${grade.net_pnl} correct=${grade.call_correct}`);
+    this.logger.info?.(`[v2] GRADE ${w.window_id} ${canon.decision.recommendation}/${settlement.outcome} → net=${grade.net_pnl} correct=${grade.call_correct} (priced from ${canon.source})`);
 
     // grade the profit engine's decision too (same settlement, its own row)
     if (st.profitDecision && !st.profitGraded) {
       try {
-        const pgrade = gradeDecision(st.profitDecision, settlement);
-        if (st.profitDecisionId != null) pgrade.decision_id = st.profitDecisionId;
+        const pcanon = await this._canonicalDecision(w.window_id, st.profitDecision.engine_id, st.profitDecision, st.profitDecisionId);
+        const pgrade = gradeDecision(pcanon.decision, settlement);
+        if (pcanon.decisionId != null) pgrade.decision_id = pcanon.decisionId;
         await this.writeGrade(pgrade);
         st.profitGraded = true;
-        this.logger.info?.(`[v2] GRADE(profit) ${w.window_id} ${st.profitDecision.recommendation}/${settlement.outcome} → net=${pgrade.net_pnl}`);
+        this.logger.info?.(`[v2] GRADE(profit) ${w.window_id} ${pcanon.decision.recommendation}/${settlement.outcome} → net=${pgrade.net_pnl} (priced from ${pcanon.source})`);
       } catch (e) {
         this.logger.error?.(`[v2] profit grade ${w.window_id} failed (isolated): ${e.message}`);
       }
