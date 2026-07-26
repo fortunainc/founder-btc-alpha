@@ -19,7 +19,7 @@ const num = (v) => (v == null ? null : Number(v));
 export async function loadV24Data(client) {
   const out = { revisions: [], grades: [], officials: [], errors: {} };
   const rev = await client.from('fa_v24_revisions')
-    .select('window_id,revision_seq,evaluated_at,tau_sec,spot,strike,up_ask,down_ask,recommendation,conviction,p_above,entry_limit,side_ev_usd,reason,waiting_for,controlling_evidence,invalidation,change_reason,data_status,missed_refreshes,window_close_ts')
+    .select('window_id,revision_seq,evaluated_at,tau_sec,spot,strike,up_ask,up_bid,down_ask,down_bid,recommendation,conviction,vote,p_above,entry_limit,side_ev_usd,reason,waiting_for,controlling_evidence,invalidation,change_reason,data_status,features,missed_refreshes,window_close_ts')
     .order('evaluated_at', { ascending: false }).limit(600);
   if (rev.error) out.errors.v24_revisions = rev.error.message; else out.revisions = rev.data ?? [];
   const off = await client.from('fa_v2_decisions')
@@ -208,7 +208,7 @@ export function renderV24({ revisions = [], grades = [], officials = [], compari
     if (st === 'YES' || st === 'NO') return `${st === 'YES' ? 'TAKE YES' : 'TAKE NO'} — enter at ${r.entry_limit != null ? Math.round(r.entry_limit * 100) + '¢ or less' : 'the stated limit'}`;
     if (st === 'NO_TRADE') return 'NO TRADE — stand aside';
     // WAIT: name the side the analysis favors + exact gap to TSM's entry
-    const side = (r.vote ?? 0) >= 0 ? 'YES' : 'NO';
+    const side = (Number(r.vote) || 0) >= 0 ? 'YES' : 'NO';
     const ask = side === 'YES' ? r.up_ask : r.down_ask;
     if (r.entry_limit != null && ask != null && ask > r.entry_limit) {
       const gap = Math.round((ask - r.entry_limit) * 100);
