@@ -139,7 +139,44 @@ function officialFor(officials, windowId) {
   return { revision_seq: Number(d.evidence?.revision_seq ?? 1), side, entry_ask: num(side === 'YES' ? d.up_ask : d.down_ask), sealed_at: d.sealed_at };
 }
 
-export function renderV24({ revisions = [], grades = [], officials = [], comparison = [], nowMs = Date.now() } = {}) {
+// window-id → human PT window (KXBTC15M-26JUL261400-00 → close 14:00 UTC that day)
+function humanFromId(wid) {
+  const m = /KXBTC15M-(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})/.exec(String(wid ?? ''));
+  if (!m) return null;
+  const months = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+  const close = Date.UTC(2000 + Number(m[1]), months[m[2]], Number(m[3]), Number(m[4]), Number(m[5]));
+  return humanWindow(new Date(close).toISOString());
+}
+
+export function renderEngineHistory({ name, version, startDate, policy, basis, calls = [], abstainStates = [] } = {}) {
+  const actionable = calls.filter((c) => !abstainStates.includes(c.action) && c.action != null);
+  const resolved = actionable.filter((c) => c.correct === true || c.correct === false);
+  const correct = resolved.filter((c) => c.correct === true).length;
+  const incorrect = resolved.length - correct;
+  const unresolved = actionable.filter((c) => c.pending).length;
+  const abstentions = calls.length - actionable.length;
+  const markets = new Set(calls.map((c) => c.window_id)).size;
+  const nets = resolved.map((c) => (c.net == null ? null : Number(c.net))).filter((v) => v != null);
+  const net = nets.reduce((a, b) => a + b, 0);
+  const acc = resolved.length ? `${((correct / resolved.length) * 100).toFixed(1)}% — ${correct} of ${resolved.length} resolved calls` : '— (0 resolved)';
+  const freq = markets ? `${actionable.length} actionable over ${markets} eligible markets (${((actionable.length / markets) * 100).toFixed(0)}% coverage)` : '—';
+  const callRow = (c) => `<tr><td class="small">${esc(humanFromId(c.window_id) ?? c.window_id)}</td><td class="small muted">${esc(c.window_id)}</td>
+    <td>${c.strike != null ? Math.round(c.strike) : '—'}</td><td>${badge(String(c.action ?? '—'))}</td>
+    <td class="small">${c.sealed ? fmtT(c.sealed) : '—'}</td>
+    <td>${c.entry != null ? Math.round(c.entry * 100) + '¢' : (c.ya != null || c.na != null ? `${c.ya != null ? Math.round(c.ya * 100) : '—'}/${c.na != null ? Math.round(c.na * 100) : '—'}¢` : '—')}</td>
+    <td>${c.p != null ? (c.p * 100).toFixed(0) + '%' : (c.conviction != null ? convictionWord(c.conviction) : '—')}</td>
+    <td>${c.mp != null ? (c.mp * 100).toFixed(0) + '%' : '—'}</td>
+    <td>${c.outcome ? esc(String(c.outcome).toUpperCase()) : 'pending'}</td>
+    <td>${c.correct == null ? '—' : c.correct ? '<span class="v24ok">✓</span>' : '<span class="v24bad">✗</span>'}</td>
+    <td>${c.net != null ? '$' + Number(c.net).toFixed(2) : '—'}</td>
+    <td class="small muted">${esc(c.version ?? version ?? '')}${c.corrected ? ' · corrected' : ''}</td></tr>`;
+  return `<details class="v24hist"><summary><b>${esc(name)}</b> — ${acc} · ${abstentions} abstentions · ${unresolved} unresolved · hypothetical net $${net.toFixed(2)} (${esc(basis)}) · since ${esc(startDate ?? '—')} · ${esc(version ?? '')}</summary>
+    <p class="muted small">Verify: ${correct} correct + ${incorrect} incorrect = ${resolved.length} resolved actionable calls. Decision frequency: ${freq}. Grading policy: ${esc(policy)}.</p>
+    <div class="scroll"><table class="v24tl"><thead><tr><th>window (PT)</th><th>market id</th><th>strike</th><th>call</th><th>recorded</th><th>entry / book</th><th>engine p / conviction</th><th>market p</th><th>outcome</th><th>✓/✗</th><th>result</th><th>version</th></tr></thead>
+    <tbody>${calls.slice(0, 150).map(callRow).join('')}</tbody></table>${calls.length > 150 ? `<p class="muted small">Showing newest 150 of ${calls.length} calls.</p>` : ''}</div></details>`;
+}
+
+export function renderV24({ revisions = [], grades = [], officials = [], comparison = [], histories = null, nowMs = Date.now() } = {}) {
   const latest = revisions.length ? revisions.reduce((a, b) => (Date.parse(a.evaluated_at) >= Date.parse(b.evaluated_at) ? a : b)) : null;
   const ageS = latest ? Math.round((nowMs - Date.parse(latest.evaluated_at)) / 1000) : null;
   const marketOpen = latest && latest.window_close_ts && Date.parse(latest.window_close_ts) > nowMs;
@@ -300,6 +337,7 @@ export function renderV24({ revisions = [], grades = [], officials = [], compari
     <b>V2.1 Technical Arbiter — PREVIOUS APPROACH:</b> the earlier technical/evidence rules choosing YES, NO, or no trade.<br>
     <b>V2.2 Profit Policy — PREVIOUS APPROACH:</b> forecast probability vs executable price — is the trade economically worthwhile.<br>
     <b>v2.3 agreement gate — SUPERSEDED:</b> retired before activation (zero emissions).</div>
+    ${histories ? `<h3 style="margin-top:14px">Complete call histories — every engine, every call (expand to verify each metric)</h3>${histories}` : ''}
     </details>
   </section>
   <style>

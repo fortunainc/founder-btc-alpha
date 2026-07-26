@@ -35,7 +35,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { FOUNDER_BANNER, RESEARCH_CHIP } from './founder-mode.js';
 import { loadValidationData, buildValidationModel, buildInspectorRows, renderValidation } from './validation.js';
-import { loadV24Data, renderV24, v24Metrics } from './v24-dashboard.js';
+import { loadV24Data, renderV24, v24Metrics, renderEngineHistory } from './v24-dashboard.js';
 
 const PT = 'America/Los_Angeles';
 
@@ -971,6 +971,28 @@ function renderPage(data) {
 
   ${data.v24 ? renderV24({
     revisions: data.v24.revisions, grades: data.v24.grades, officials: data.v24.officials ?? [], nowMs: Date.now(),
+    histories: (() => {
+      const r = data.validationRows;
+      if (!r) return null;
+      const mapV2 = (row) => ({ ...row, entry: row.action === 'TAKE_YES' ? row.ya : row.action === 'TAKE_NO' ? row.na : null });
+      const v24Calls = (data.v24.officials ?? []).map((o) => {
+        const g = data.v24.grades.find((x) => x.window_id === o.window_id);
+        const side = o.recommendation === 'TAKE_YES' ? 'YES' : 'NO';
+        return { window_id: o.window_id, sealed: o.sealed_at, strike: null, action: side,
+          entry: Number(side === 'YES' ? o.up_ask : o.down_ask), p: o.evidence?.p_above ?? null, mp: null,
+          conviction: o.conviction ?? null, outcome: g?.settled_outcome ?? null,
+          correct: g?.call_correct ?? null, net: g?.net_pnl != null ? Number(g.net_pnl) : null,
+          pending: !g || (g.settled_outcome !== 'yes' && g.settled_outcome !== 'no'), version: 'v2.4.0-shadow' };
+      });
+      const first = (rows) => rows.length ? new Date(Math.min(...rows.map((x) => Date.parse(x.sealed)).filter(Number.isFinite))).toISOString().slice(0, 10) : null;
+      return [
+        renderEngineHistory({ name: 'TSM Technical v2.4 (PRIMARY SHADOW)', version: 'v2.4.0-shadow', startDate: '2026-07-26', basis: 'one contract per official call, entry at recorded price incl. fee, held to settlement', policy: 'first actionable YES/NO meeting the executable entry (pre-registered); WAIT/NO TRADE are abstentions', calls: v24Calls, abstainStates: [] }),
+        renderEngineHistory({ name: 'Probability Forecast (BASELINE)', version: 'forecast-v1 (all timing checkpoints — NOT independent calls)', startDate: first(r.forecast), basis: 'directional only — no priced entries, no dollar results', policy: 'graded per timing checkpoint vs settlement; FAIR/THIN are abstentions; checkpoints from one market are correlated', calls: r.forecast, abstainStates: ['FAIR', 'THIN'] }),
+        renderEngineHistory({ name: 'V2.1 Technical Arbiter (PREVIOUS APPROACH)', version: 'v2.1.0 (frozen)', startDate: first(r.v21), basis: 'one contract per call, sealed executable ask incl. fee, held to settlement', policy: 'single official call sealed ~minute 3; NO TRADE is an abstention; append-only corrections shown', calls: r.v21.map(mapV2), abstainStates: ['NO_TRADE'] }),
+        renderEngineHistory({ name: 'V2.2 Profit Policy (PREVIOUS APPROACH)', version: 'v2.2.0 (frozen)', startDate: first(r.v22), basis: 'one contract per call, sealed executable ask incl. fee, held to settlement', policy: 'single official call sealed ~minute 3; after-fee EV threshold $0.02; NO TRADE is an abstention', calls: r.v22.map(mapV2), abstainStates: ['NO_TRADE'] }),
+        '<p class="muted small">v2.3 agreement gate: zero valid records (superseded before activation) — no history exists. Position Manager: managed-trade history appears in section E once prospective managed trades resolve.</p>',
+      ].join('');
+    })(),
     comparison: (() => {
       const m = data.validationModel;
       const row = (name, methodology, mm, status) => ({ name, methodology, resolved: mm?.settled_actionable ?? null, correct: mm?.correct ?? null, incorrect: mm?.incorrect ?? null, accuracy_pct: mm?.accuracy_pct ?? null, net_usd: mm?.net ?? null, status });
