@@ -1076,7 +1076,10 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
       }
       res.writeHead(302, {
         location: '/dash',
-        'set-cookie': `${COOKIE}=${cookieValue}; Path=/dash; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`,
+        // Lax (founder 2026-07-26): Strict blocked the cookie on link-clicks from
+        // chat/notes (cross-site top-level navigations), reading as random 401s.
+        // Lax still sends it only on top-level GETs — fine for a read-only page.
+        'set-cookie': `${COOKIE}=${cookieValue}; Path=/dash; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
         'cache-control': 'no-store',
         'referrer-policy': 'no-referrer',
       });

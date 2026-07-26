@@ -31,7 +31,7 @@ test('bootstrap: valid ?token= → 302 to clean /dash with HttpOnly Secure cooki
     assert.equal(r.headers.location, '/dash');
     const c = r.headers['set-cookie'][0];
     assert.match(c, /^fa_dash=[0-9a-f]{64}; /);
-    assert.match(c, /HttpOnly/); assert.match(c, /Secure/); assert.match(c, /SameSite=Strict/);
+    assert.match(c, /HttpOnly/); assert.match(c, /Secure/); assert.match(c, /SameSite=Lax/); // Lax: survives link-clicks from chat/notes
   });
 });
 
