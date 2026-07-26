@@ -20,6 +20,22 @@
       },
       "analysis_guidance": "Exclude this span from cadence/uptime/gap statistics (v_fa_capture_health uptime_pct_of_expected is inflated for 2026-07-23). Forecast, seal and settlement analysis are UNAFFECTED.",
       "prevention": "Any future non-production worker run MUST pass --dry-run. Only one worker may write at a time; this is why railway.json pins numReplicas=1."
+    },
+    {
+      "id": "double-write-2026-07-26T02:25",
+      "span_utc": {
+        "from": "2026-07-26T02:25:04Z",
+        "to": "2026-07-26T02:27:30Z"
+      },
+      "cause": "Operator error (agent): a verification step ran import(\"./src/worker.js\"), which self-executes worker.start(); with local .env creds and CAPTURE_DRY_RUN=false it wrote to PROD for ~90s concurrently with Railway before the command timeout (SIGTERM) stopped it.",
+      "impact": {
+        "excess_capture_rows": 18,
+        "data_validity": "Genuine snapshots, distinct timestamps, not corrupt. Defect is DENSITY: ~2x cadence for this ~2.5min span (local writer offset ~1s from Railway).",
+        "seals_affected": "NONE (0 seals in span; seals are idempotent via ON CONFLICT regardless).",
+        "settlements_affected": "NONE"
+      },
+      "analysis_guidance": "Exclude this span from cadence/uptime/gap stats. Forecast/seal/settlement analysis unaffected.",
+      "prevention": "NEVER import src/worker.js for checks — it self-executes. Syntax-check with node --check and import only non-self-executing modules (dashboard.js, validation.js)."
     }
   ]
 }
