@@ -6,15 +6,28 @@
  * counted as incorrect directional calls. No revision is hidden after the fact.
  */
 
+import { instructionFor, manageMarket, PM_POLICY_VERSION } from './v2/technical/position-manager.js';
+
+// Managed-trade OFFICIAL record starts prospectively at the position-manager
+// registration (experiment btc-v24-position-manager-e1). Earlier markets are
+// DIAGNOSTIC REPLAY only and labeled as such.
+export const PM_POLICY_START = '2026-07-26T17:45:00Z';
+
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const num = (v) => (v == null ? null : Number(v));
 
 export async function loadV24Data(client) {
-  const out = { revisions: [], grades: [], errors: {} };
+  const out = { revisions: [], grades: [], officials: [], errors: {} };
   const rev = await client.from('fa_v24_revisions')
     .select('window_id,revision_seq,evaluated_at,tau_sec,spot,strike,up_ask,down_ask,recommendation,conviction,p_above,entry_limit,side_ev_usd,reason,waiting_for,controlling_evidence,invalidation,change_reason,data_status,missed_refreshes,window_close_ts')
     .order('evaluated_at', { ascending: false }).limit(600);
   if (rev.error) out.errors.v24_revisions = rev.error.message; else out.revisions = rev.data ?? [];
+  const off = await client.from('fa_v2_decisions')
+    .select('window_id,recommendation,sealed_at,up_ask,down_ask,evidence')
+    .eq('engine_id', 'btc-alpha-v24-technical')
+    .order('sealed_at', { ascending: false }).limit(300);
+  if (off.error) out.errors.v24_officials = off.error.message; else out.officials = off.data ?? [];
+
   const gr = await client.from('fa_v2_grades')
     .select('window_id,engine_id,recommendation,settled_outcome,call_correct,entry_price,fee,net_pnl,graded_at')
     .eq('engine_id', 'btc-alpha-v24-technical')
@@ -72,7 +85,14 @@ const fmtT = (iso) => { try { return new Date(iso).toLocaleTimeString('en-US', {
 const badge = (rec) => `<span class="v24b v24b-${esc(rec)}">${esc(rec)}</span>`;
 const frac = (label, a, b, extra = '') => b > 0 ? `${label}: <b>${((a / b) * 100).toFixed(1)}%</b> — ${a} of ${b}${extra}` : `${label}: <b>—</b> (0 samples)`;
 
-export function renderV24({ revisions = [], grades = [], comparison = [], nowMs = Date.now() } = {}) {
+function officialFor(officials, windowId) {
+  const d = (officials ?? []).find((o) => o.window_id === windowId);
+  if (!d) return null;
+  const side = d.recommendation === 'TAKE_YES' ? 'YES' : 'NO';
+  return { revision_seq: Number(d.evidence?.revision_seq ?? 1), side, entry_ask: num(side === 'YES' ? d.up_ask : d.down_ask), sealed_at: d.sealed_at };
+}
+
+export function renderV24({ revisions = [], grades = [], officials = [], comparison = [], nowMs = Date.now() } = {}) {
   const latest = revisions.length ? revisions.reduce((a, b) => (Date.parse(a.evaluated_at) >= Date.parse(b.evaluated_at) ? a : b)) : null;
   const ageS = latest ? Math.round((nowMs - Date.parse(latest.evaluated_at)) / 1000) : null;
   const marketOpen = latest && latest.window_close_ts && Date.parse(latest.window_close_ts) > nowMs;
@@ -81,6 +101,18 @@ export function renderV24({ revisions = [], grades = [], comparison = [], nowMs 
   const day = v24Metrics({ grades, revisions, sinceMs: 24 * 3600e3, nowMs });
   const wk = v24Metrics({ grades, revisions, sinceMs: 7 * 24 * 3600e3, nowMs });
   const mo = v24Metrics({ grades, revisions, sinceMs: 30 * 24 * 3600e3, nowMs });
+
+  // §4 dual instruction: new users vs a user holding the official entry
+  let dual = '';
+  if (latest) {
+    const off = officialFor(officials, latest.window_id);
+    if (off && marketOpen) {
+      const ins = instructionFor(latest, off.side);
+      dual = `<div class="v24dual"><b>New users:</b> ${badge(latest.recommendation)} &nbsp;·&nbsp; <b>Existing ${esc(off.side)} position (official entry ${Math.round(off.entry_ask * 100)}¢):</b> <span class="v24b v24b-${ins.action.startsWith('EXIT') ? 'NO' : ins.action === 'TAKE_PROFIT' ? 'YES' : 'WAIT'}">${esc(ins.action.replace(/_/g, ' '))}</span><br><span class="muted small">Why: ${esc(ins.reason)}${ins.exec_bid != null ? ` · executable exit ${Math.round(ins.exec_bid * 100)}¢` : ''}</span></div>`;
+    } else if (marketOpen) {
+      dual = `<div class="v24dual"><b>New users:</b> ${badge(latest.recommendation)} &nbsp;·&nbsp; <span class="muted small">no official entry yet this market — position guidance appears once one fires</span></div>`;
+    }
+  }
 
   const current = !latest ? '<p class="muted">No revisions yet — engine awaiting activation (V24_SHADOW).</p>' : `
     <div class="v24cur ${staleWarn ? 'v24stale' : ''}">
@@ -97,6 +129,7 @@ export function renderV24({ revisions = [], grades = [], comparison = [], nowMs 
       <p class="v24why">${esc(latest.reason)}</p>
       ${latest.waiting_for ? `<p class="muted small">Waiting for: ${esc(latest.waiting_for)}</p>` : ''}
       ${latest.change_reason ? `<p class="muted small">Change: ${esc(latest.change_reason)}</p>` : ''}
+      ${dual}
     </div>`;
 
   const perf = (m, label) => `<tr><td>${label}</td><td>${m.resolved}</td><td>${m.correct}</td><td>${m.incorrect}</td>
@@ -128,6 +161,36 @@ export function renderV24({ revisions = [], grades = [], comparison = [], nowMs 
     <p class="muted small">${frac('YES accuracy', life.yes_correct, life.yes_n)} · ${frac('NO accuracy', life.no_correct, life.no_n)} · streak ${life.streak >= 0 ? '+' + life.streak : life.streak} · ${life.revision_count} revisions over ${life.markets_covered} markets</p>
     <h3>Per-market recommendation timelines (every revision, in order — nothing hidden after the outcome)</h3>
     ${timelines || '<p class="muted">No markets yet.</p>'}
+    <h2 style="margin-top:18px">2b · Managed trades — position manager (${PM_POLICY_VERSION}, SHADOW)</h2>
+    <p class="muted small"><b>Signal accuracy</b> asks whether TSM's original market direction was correct. <b>Managed performance</b> asks how a user would have done following TSM's complete entry AND exit instructions. They are never combined. Official managed record is PROSPECTIVE from ${PM_POLICY_START}; earlier markets shown only as labeled diagnostic replay.</p>
+    ${(() => {
+      const byWindow = new Map();
+      for (const r of revisions) { if (!byWindow.has(r.window_id)) byWindow.set(r.window_id, []); byWindow.get(r.window_id).push(r); }
+      const rows = [];
+      for (const [wid, revs] of byWindow) {
+        const off = officialFor(officials, wid);
+        if (!off) continue;
+        const g = grades.find((x) => x.window_id === wid);
+        const outcome = g?.settled_outcome === 'yes' || g?.settled_outcome === 'no' ? g.settled_outcome : null;
+        const m = manageMarket({ revisions: [...revs].sort((a, b) => a.revision_seq - b.revision_seq), official: off, outcome });
+        if (!m.entered) continue;
+        const prospective = Date.parse(off.sealed_at) >= Date.parse(PM_POLICY_START);
+        rows.push({ wid, m, prospective, outcome });
+      }
+      if (!rows.length) return '<p class="muted">No managed trades yet.</p>';
+      const officialRows = rows.filter((r) => r.prospective && r.outcome);
+      const net = officialRows.reduce((a, r) => a + (r.m.managed_net ?? 0), 0);
+      const helped = officialRows.filter((r) => r.m.exit_helped === true).length;
+      const exits = officialRows.filter((r) => r.m.exit).length;
+      return `<p class="small">OFFICIAL (prospective): <b>${officialRows.length}</b> resolved managed trades · net <b>$${net.toFixed(2)}</b> · exits ${exits}${exits ? ` (improved result in ${helped}/${exits})` : ''}</p>
+      <div class="scroll"><table><thead><tr><th>market</th><th>side@entry</th><th>exit</th><th>managed net</th><th>if held</th><th>exit helped?</th><th>status</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td class="small">${esc(r.wid)}</td><td>${esc(r.m.side)} @ ${Math.round(r.m.entry.ask * 100)}¢</td>
+        <td class="small">${r.m.exit ? `${esc(r.m.exit.action)} @ ${Math.round(r.m.exit.bid * 100)}¢ (rev#${r.m.exit.at_seq})` : 'held to resolution'}</td>
+        <td>${r.m.managed_net != null ? '$' + r.m.managed_net.toFixed(2) : '—'}</td><td>${r.m.held_to_resolution_net != null ? '$' + r.m.held_to_resolution_net.toFixed(2) : '—'}</td>
+        <td>${r.m.exit_helped == null ? '—' : r.m.exit_helped ? '✓' : '✗'}</td>
+        <td class="small">${r.prospective ? 'OFFICIAL' : 'DIAGNOSTIC REPLAY (pre-registration)'}${r.outcome ? '' : ' · unresolved'}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    })()}
     <h2 style="margin-top:18px">3 · Previous approaches — comparison</h2>
     <div class="scroll"><table><thead><tr><th>engine</th><th>methodology</th><th>resolved</th><th>✓</th><th>✗</th><th>accuracy</th><th>net</th><th>status</th></tr></thead>
     <tbody>${compRows}</tbody></table></div>

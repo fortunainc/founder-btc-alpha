@@ -968,7 +968,7 @@ function renderPage(data) {
   ${sealBanner}
 
   ${data.v24 ? renderV24({
-    revisions: data.v24.revisions, grades: data.v24.grades, nowMs: Date.now(),
+    revisions: data.v24.revisions, grades: data.v24.grades, officials: data.v24.officials ?? [], nowMs: Date.now(),
     comparison: (() => {
       const m = data.validationModel;
       const row = (name, methodology, mm, status) => ({ name, methodology, resolved: mm?.settled_actionable ?? null, correct: mm?.correct ?? null, incorrect: mm?.incorrect ?? null, accuracy_pct: mm?.accuracy_pct ?? null, net_usd: mm?.net ?? null, status });
