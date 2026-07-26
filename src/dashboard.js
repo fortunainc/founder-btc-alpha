@@ -110,7 +110,9 @@ function sampleQuality(nGraded) {
   if (n <= 19) return { label: 'Early evidence', cls: 'q-warn' };
   if (n <= 49) return { label: 'Developing sample', cls: 'q-warn' };
   if (n <= 199) return { label: 'Meaningful sample', cls: 'q-ok' };
-  return { label: 'Statistically validated', cls: 'q-ok' };
+  // §7 (dash rebuild 2026-07-26): "Statistically validated" was a decorative label —
+  // checkpoints from one market are CORRELATED, no documented test backs the claim.
+  return { label: 'Large sample — checkpoints correlated, not independently validated', cls: 'q-ok' };
 }
 
 /**
@@ -983,16 +985,14 @@ function renderPage(data) {
     })(),
   }) : ''}
 
-  ${renderMarketHeader(data)}
-  ${renderEngineCards(data)}
-
-  <h2>Historical accuracy — each engine independently</h2>
-  ${renderComparisonTable(data)}
-  <p class="muted small" style="margin:8px 0 0">Directional accuracy only — settled TAKE YES / TAKE NO recommendations, one canonical decision per window, NO TRADE excluded. Not a measure of profitability.</p>
-
   <details id="research">
-    <summary>Technical details — advanced only</summary>
+    <summary>G · Advanced diagnostics — timing checkpoints, raw engine outputs, reconciliation (founder-only technical language lives here)</summary>
     <div class="scroll">
+      ${renderMarketHeader(data)}
+      ${renderEngineCards(data)}
+      <h2>Historical accuracy — each engine independently (different samples/dates — NOT apples-to-apples)</h2>
+      ${renderComparisonTable(data)}
+      <p class="muted small" style="margin:8px 0 0">Directional accuracy only — settled TAKE YES / TAKE NO recommendations, one official graded call per market, NO TRADE excluded. Not a measure of profitability. Forecast timing checkpoints (10/5/2-min) are repeated observations of the SAME market — they are not independent calls.</p>
       ${renderLatestActionable(data, currentDecision(data).windowId)}
       <h2>Per-timing forecast performance</h2>
       ${renderPerformance(data)}

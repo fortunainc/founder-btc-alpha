@@ -34,7 +34,7 @@ test('timelines: revisions grouped per market ascending; nothing dropped or reor
 test('render: every accuracy shows numerator/denominator; stale open-market analysis shows the red refusal banner', () => {
   const grades = [G('A', 'TAKE_YES', 'yes', true, 0.4, 500)];
   const fresh = renderV24({ revisions: [R('A', 1, 'YES', 1)], grades, comparison: [], nowMs: NOW });
-  assert.match(fresh, /\(1\/1\)/, 'accuracy carries its sample');
+  assert.match(fresh, /1 of 1/, 'accuracy carries its sample');
   assert.ok(!/ANALYSIS STALE/.test(fresh));
   const stale = renderV24({ revisions: [R('A', 1, 'YES', 10, { window_close_ts: new Date(NOW + 5 * 60e3).toISOString() })], grades, comparison: [], nowMs: NOW });
   assert.match(stale, /ANALYSIS STALE/, 'stale current recommendation is refused, not presented as current');

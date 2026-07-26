@@ -91,15 +91,16 @@ test('FAIR and THIN translate to NO TRADE with a plain reason', () => {
   assert.equal(foundOutput(null).badge, 'NO TRADE'); // no seal yet
 });
 
-test('primary shows three independent engine cards, no edge/divergence jargon', () => {
+test('DASH REBUILD §6: previous engines are OUT of the primary flow (collapsed); primary leads with the BTC decision', () => {
   const html = renderPage(SAMPLE);
   const primary = html.split('<details')[0];
-  assert.match(primary, /Forecast/);
-  assert.match(primary, /V2\.1 Arbiter/);
-  assert.match(primary, /V2\.2 Profit/);
-  assert.match(primary, /Accuracy is calculated separately for each engine using one settled actionable recommendation per market window\. NO TRADE is excluded\. Accuracy does not establish profitability/);
+  const withV24 = renderPage({ ...SAMPLE, v24: { revisions: [], grades: [], officials: [] } });
+  assert.match(withV24.split('<details')[0], /BTC 15-Minute Decision/);
+  assert.ok(!/V2\.1 Arbiter/.test(primary), 'previous engines are not in the primary flow');
   assert.ok(!/divergence/i.test(primary), 'no "divergence" on the primary surface');
-  assert.ok(!/\bT-(?:10|5|2)\b/.test(primary), 'no T-x jargon on the primary surface');
+  // the engine cards + per-engine accuracy still EXIST — inside collapsed diagnostics
+  assert.match(html, /V2\.1 Arbiter/);
+  assert.match(html, /Historical accuracy — each engine independently/);
 });
 
 test('primary states founder-only / no capital / no orders', () => {
@@ -129,7 +130,7 @@ test('sample-quality labels scale with graded n', () => {
   assert.equal(sampleQuality(12).label, 'Early evidence');
   assert.equal(sampleQuality(30).label, 'Developing sample');
   assert.equal(sampleQuality(120).label, 'Meaningful sample');
-  assert.equal(sampleQuality(500).label, 'Statistically validated');
+  assert.match(sampleQuality(500).label, /Large sample — checkpoints correlated, not independently validated/); // §7: never a decorative "statistically validated" badge
 });
 
 test('paper P&L is separate from call record and uses after-fee executable pricing', () => {
@@ -159,7 +160,8 @@ test('times render as a 12-hour clock (5pm), never 24-hour (17:00)', () => {
 test('research tables are present but collapsed under a details element', () => {
   const html = renderPage(SAMPLE);
   assert.match(html, /<details id="research">/);
-  assert.match(html, /Technical details/);
+  assert.match(html, /Advanced diagnostics/);
+  assert.match(html, /NOT apples-to-apples/);
 });
 
 test('capture-alive is green within 60s, red beyond, none when null', () => {
@@ -233,14 +235,13 @@ test('successRate aggregates actionable YES/NO calls with a YES/NO split', () =>
   assert.equal(sr.yesG + sr.noG, sr.graded);
 });
 
-test('always-visible primary shows the three engines + a per-engine accuracy comparison table', () => {
+test('DASH REBUILD §13: the per-engine comparison lives in advanced diagnostics, not the always-visible primary', () => {
   const html = renderPage(SAMPLE);
   const beforeDetails = html.split('<details')[0];
-  assert.match(beforeDetails, /Historical accuracy — each engine independently/);
-  assert.match(beforeDetails, /<table class="cmp-tbl">/);
-  assert.match(beforeDetails, /Forecast/);
-  assert.match(beforeDetails, /V2\.1 Arbiter/);
-  assert.match(beforeDetails, /V2\.2 Profit/);
+  assert.ok(!/Historical accuracy — each engine independently/.test(beforeDetails));
+  const research = html.slice(html.indexOf('<details id="research">'));
+  assert.match(research, /Historical accuracy — each engine independently/);
+  assert.match(research, /<table class="cmp-tbl">/);
 });
 
 test('per-engine accuracy: dedups Forecast to canonical/window; excludes NO TRADE, replay, and PRE-VERSION; denominator is settled_actionable', () => {
