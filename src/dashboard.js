@@ -1,10 +1,16 @@
 /**
  * Founder-only read-only dashboard.
  *
- * Serves exactly ONE route: GET /dash?token=<FOUNDER_DASH_TOKEN>. Everything
+ * Serves exactly ONE route: GET /dash. Auth (R5/S1 2026-07-26): a one-time
+ * bootstrap GET /dash?token=<FOUNDER_DASH_TOKEN> answers 302 with an HttpOnly
+ * Secure SameSite=Strict session cookie and redirects to the CLEAN /dash URL,
+ * so the token never persists in the address bar, browser history, or logs.
+ * Subsequent requests authenticate via the cookie (or Authorization: Bearer
+ * for curl). Rotating FOUNDER_DASH_TOKEN invalidates every issued cookie
+ * (the cookie is an HMAC derived from the token — no server-side state). Everything
  * else 404s with no detail. The page is fully self-contained (inline CSS, no
  * external requests), renders Pacific time in a 12-hour clock, and auto-refreshes
- * every 10s via a meta refresh (the token in the URL is preserved on reload).
+ * every 10s via a meta refresh (re-authenticated by the session cookie).
  *
  * 2026-07-24 — FOUNDER PRESENTATION REWRITE (presentation layer ONLY).
  *   Answers one question first: TAKE YES / TAKE NO / NO TRADE (shadow).
@@ -405,7 +411,11 @@ function renderLatestActionable(data, curWindowId) {
   const hs = Number(r.half_spread), mid = Number(r.market_p);
   const m = r.call === 'YES' ? mid : (1 - mid);
   const askPct = Math.round((Number.isFinite(hs) ? m + hs : m) * 100);
-  const entryRef = `${esc(r.call)} ask ≈ ${askPct}¢${Number.isFinite(hs) ? '' : ' (mid; spread n/a)'}`;
+  // P3 (audit R8): never present a midpoint as an executable ask. With no captured
+  // spread there IS no observable ask — say so, instead of a mid dressed as one.
+  const entryRef = Number.isFinite(hs)
+    ? `${esc(r.call)} ask ≈ ${askPct}¢`
+    : `${esc(r.call)} mid ${askPct}¢ — NOT executable (spread not captured); grading uses the sealed ask`;
   return `
   <section class="card actionable demoted">
     <div class="dhead">
@@ -816,6 +826,16 @@ function renderPage(data) {
     ? `<div class="err">data warnings: ${esc(Object.entries(data.errors).map(([k, v]) => `${k}: ${v}`).join(' | '))}</div>`
     : '';
 
+  // Seal freshness (money-first Phase A, 2026-07-26): the data feed can be LIVE while
+  // the scheduler has silently stopped SEALING (the R1 failure class, engine-side).
+  // Windows are 15m and every engine seals each window, so the newest v2 seal should
+  // never be older than ~2 windows. Loud red banner — never a silent absence.
+  const newestSealMs = (data.liveCalls?.length ? new Date(data.liveCalls[0].sealed_at).getTime() : null);
+  const sealAgeMin = newestSealMs == null ? null : Math.round((Date.now() - newestSealMs) / 60000);
+  const sealBanner = (sealAgeMin == null || sealAgeMin > 45)
+    ? `<div class="err">⚠ SEAL FRESHNESS: newest engine seal ${sealAgeMin == null ? 'NOT FOUND' : `${sealAgeMin} min old`} (expected ≤ ~18 min). The capture feed may still be live — engines may have silently stopped sealing. Check the Railway worker.</div>`
+    : '';
+
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -939,6 +959,7 @@ function renderPage(data) {
       data feed <span style="color:${aliveColor}">${esc(aliveText)}</span></span>
   </header>
   ${errBanner}
+  ${sealBanner}
 
   ${renderMarketHeader(data)}
   ${renderEngineCards(data)}
@@ -1005,6 +1026,24 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
     return null;
   }
 
+  // Deterministic session value: HMAC(token, purpose). No server-side session
+  // store — a worker restart keeps cookies valid; rotating the token kills them.
+  const cookieValue = crypto.createHmac('sha256', token).update('fa-dash-session-v1').digest('hex');
+  const COOKIE = 'fa_dash';
+
+  const readCookie = (req) => {
+    const raw = req.headers?.cookie || '';
+    for (const part of raw.split(';')) {
+      const i = part.indexOf('=');
+      if (i > 0 && part.slice(0, i).trim() === COOKIE) return part.slice(i + 1).trim();
+    }
+    return '';
+  };
+  const bearer = (req) => {
+    const h = req.headers?.authorization || '';
+    return h.startsWith('Bearer ') ? h.slice(7) : '';
+  };
+
   const server = http.createServer(async (req, res) => {
     let pathname = '/';
     let query;
@@ -1026,7 +1065,27 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
     if (req.method !== 'GET' || pathname !== '/dash') {
       return deny(404, 'not found');
     }
-    if (!timingSafeEqual(query.get('token') || '', token)) {
+
+    // 1) One-time bootstrap: ?token=… → set cookie, redirect to the clean URL.
+    //    (Also upgrades any old bookmarked token URL to the cookie flow.)
+    const qtok = query.get('token') || '';
+    if (qtok) {
+      if (!timingSafeEqual(qtok, token)) {
+        logger.warn?.(`[dash] rejected bad bootstrap token from ${req.socket.remoteAddress}`);
+        return deny(401, 'unauthorized');
+      }
+      res.writeHead(302, {
+        location: '/dash',
+        'set-cookie': `${COOKIE}=${cookieValue}; Path=/dash; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`,
+        'cache-control': 'no-store',
+        'referrer-policy': 'no-referrer',
+      });
+      return res.end();
+    }
+
+    // 2) Steady state: session cookie (browser) or Authorization: Bearer (curl).
+    const authed = timingSafeEqual(readCookie(req), cookieValue) || timingSafeEqual(bearer(req), token);
+    if (!authed) {
       logger.warn?.(`[dash] rejected unauthenticated /dash from ${req.socket.remoteAddress}`);
       return deny(401, 'unauthorized');
     }
@@ -1052,7 +1111,7 @@ export function startDashboard({ getClient, token, port, logger = console } = {}
 
   server.on('error', (err) => logger.error?.(`[dash] server error: ${err.message}`));
   server.listen(port, '0.0.0.0', () => {
-    logger.info?.(`[dash] founder dashboard listening on :${port} route GET /dash (token required)`);
+    logger.info?.(`[dash] founder dashboard listening on :${port} route GET /dash (cookie session; one-time token bootstrap)`);
   });
   return server;
 }

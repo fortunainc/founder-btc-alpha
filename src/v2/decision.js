@@ -1,6 +1,14 @@
 /**
  * BTC Alpha V2 — decision rule (Phase A).
  *
+ * ██ QUARANTINED LEGACY (money-first Phase A, 2026-07-26 — audit P3) ██
+ * spec v2.0.0. NOT in the production path: src/v2/scheduler.js runs
+ * arbiter.js (v2.1.0) + profit.js (v2.2.0); nothing outside its own test
+ * imports this module (verified by grep 2026-07-26). Retained — not deleted —
+ * to preserve model/version lineage (v2.0.0 rows exist in fa_v2_decisions and
+ * the dashboard splits them out as legacy). DO NOT EXTEND; new logic goes in
+ * a registered challenger, never here.
+ *
  * F7 distance-vs-time is a HARD GATE (a side beyond the vol×time band is
  * forbidden). Directional conviction comes from a weighted consensus of the
  * directional families; in Phase A only F3 momentum is active (F2 structure,
