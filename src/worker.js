@@ -106,6 +106,9 @@ class CaptureWorker {
             return data && data.length ? data[0] : null;
           },
           withProfitEngine: V2_PROFIT,
+          withV23Challenger: process.env.V23_SHADOW === 'true',
+          withV24Technical: process.env.V24_SHADOW === 'true',
+          writeRevision: (row) => this.sink.writeV24Revision ? this.sink.writeV24Revision(row) : Promise.reject(new Error('sink lacks writeV24Revision')),
           getOrderbook: async (windowId) => {
             const ob = await this.kalshi.getOrderbook(windowId, 100);
             if (ob.status !== 200) throw new Error(`orderbook HTTP ${ob.status}`);

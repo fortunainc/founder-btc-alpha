@@ -35,6 +35,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { FOUNDER_BANNER, RESEARCH_CHIP } from './founder-mode.js';
 import { loadValidationData, buildValidationModel, buildInspectorRows, renderValidation } from './validation.js';
+import { loadV24Data, renderV24, v24Metrics } from './v24-dashboard.js';
 
 const PT = 'America/Los_Angeles';
 
@@ -166,6 +167,11 @@ async function loadData(client) {
     out.validationRows = null;
     out.errors.validation = e.message;
   }
+
+  // v2.4 founder technical engine (primary hierarchy) — isolated failure, loud error
+  try {
+    out.v24 = await loadV24Data(client);
+  } catch (e) { out.v24 = { revisions: [], grades: [], errors: { v24: e.message } }; out.errors.v24 = e.message; }
 
   const cap = await client
     .from('fa_window_capture')
@@ -960,6 +966,22 @@ function renderPage(data) {
   </header>
   ${errBanner}
   ${sealBanner}
+
+  ${data.v24 ? renderV24({
+    revisions: data.v24.revisions, grades: data.v24.grades, nowMs: Date.now(),
+    comparison: (() => {
+      const m = data.validationModel;
+      const row = (name, methodology, mm, status) => ({ name, methodology, resolved: mm?.settled_actionable ?? null, correct: mm?.correct ?? null, incorrect: mm?.incorrect ?? null, accuracy_pct: mm?.accuracy_pct ?? null, net_usd: mm?.net ?? null, status });
+      const v24m = v24Metrics({ grades: data.v24.grades, revisions: data.v24.revisions });
+      return [
+        { name: 'v2.4 Technical (THIS)', methodology: 'continuous founder technical synthesis (STRAT/FVG/ICT/vol), 2.5-min revisions, first-actionable grading', resolved: v24m.resolved, correct: v24m.correct, incorrect: v24m.incorrect, accuracy_pct: v24m.accuracy_pct, net_usd: v24m.net_usd, status: 'SHADOW (primary candidate)' },
+        row('Forecast', 'independent probability models B0-B3, per-timing seals', m?.fAll ?? null, 'frozen incumbent'),
+        row('V2.1 Arbiter', 'regime + evidence-family conviction, single seal ~min 3', m?.v21 ?? null, 'frozen incumbent'),
+        row('V2.2 Profit', 'fee-aware EV policy over recomputed B1, single seal', m?.v22 ?? null, 'frozen incumbent'),
+        { name: 'v2.3 agreement gate', methodology: 'v2.1 conviction AND v2.2 EV agreement (single seal)', resolved: 0, correct: 0, incorrect: 0, accuracy_pct: null, net_usd: null, status: 'SUPERSEDED before activation (zero emissions — registry row 3)' },
+      ];
+    })(),
+  }) : ''}
 
   ${renderMarketHeader(data)}
   ${renderEngineCards(data)}

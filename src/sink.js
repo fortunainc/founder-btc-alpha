@@ -21,6 +21,7 @@ const SEAL_TABLE = 'fa_forecast_seal';
 const GRADE_TABLE = 'fa_forecast_grade';
 // BTC Alpha V2 (btc-alpha-v2-scalp) — migration 005. Append-only, one seal + one grade per window.
 const V2_DECISION_TABLE = 'fa_v2_decisions';
+const V24_REVISION_TABLE = 'fa_v24_revisions';
 const V2_GRADE_TABLE = 'fa_v2_grades';
 
 /**
@@ -201,6 +202,18 @@ class BaseSink {
       return { written: 0, error: err.message };
     }
   }
+
+  /** v2.4: persist ONE immutable technical revision (append-only; unique (window_id, revision_seq)). */
+  async writeV24Revision(row) {
+    try {
+      await this._insertV24Revision(row);
+      return { written: 1 };
+    } catch (err) {
+      this.stats.errors += 1;
+      this.logger.error?.(`[sink] v24 revision write failed: ${err.message}`);
+      return { written: 0, error: err.message };
+    }
+  }
 }
 
 export class SupabaseSink extends BaseSink {
@@ -249,6 +262,16 @@ export class SupabaseSink extends BaseSink {
       .from(table)
       .upsert(clean, { onConflict: conflictCols, ignoreDuplicates: true });
     if (error) throw new Error(`${error.code || ''} ${error.message}`.trim());
+  }
+
+  async _insertV24Revision(row) {
+    const client = await this._ensureClient();
+    const payload = { ...row, features: row.features ?? null, data_status: row.data_status ?? null };
+    const { error } = await client.from(V24_REVISION_TABLE).insert(payload);
+    if (error) {
+      if (String(error.message || '').includes('duplicate')) return; // idempotent on (window_id, revision_seq)
+      throw new Error(error.message);
+    }
   }
 
   async _insertV2Decision(row) {
@@ -303,6 +326,10 @@ export class DryRunSink extends BaseSink {
     const file = this.files[table];
     const payload = rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
     await fs.promises.appendFile(file, payload, 'utf8');
+  }
+
+  async _insertV24Revision(row) {
+    await this._write(V24_REVISION_TABLE, [row]);
   }
 
   async _insertV2Decision(row) {
