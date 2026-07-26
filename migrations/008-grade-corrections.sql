@@ -38,13 +38,15 @@ GRANT SELECT, INSERT ON founder_alpha.fa_v2_grade_corrections TO service_role;
 -- scoreboards) read THIS, never the base table directly, when money is displayed.
 CREATE OR REPLACE VIEW founder_alpha.v_fa_v2_grades_canonical AS
 SELECT
-  g.id, g.decision_id, g.window_id, g.engine_id, g.recommendation,
-  g.settled_outcome, g.settlement_value, g.graded_at, g.call_correct,
-  COALESCE((c.corrected_fields->>'entry_price')::numeric, g.entry_price) AS entry_price,
-  COALESCE((c.corrected_fields->>'fee')::numeric,         g.fee)         AS fee,
-  COALESCE((c.corrected_fields->>'net_pnl')::numeric,     g.net_pnl)     AS net_pnl,
-  (c.id IS NOT NULL)                                                     AS corrected,
-  c.reason                                                               AS correction_reason
+  g.id, g.decision_id, g.window_id, g.engine_id,
+  COALESCE(c.corrected_fields->>'recommendation', g.recommendation)        AS recommendation,
+  g.settled_outcome, g.settlement_value, g.graded_at,
+  COALESCE((c.corrected_fields->>'call_correct')::boolean, g.call_correct) AS call_correct,
+  COALESCE((c.corrected_fields->>'entry_price')::numeric, g.entry_price)   AS entry_price,
+  COALESCE((c.corrected_fields->>'fee')::numeric,         g.fee)           AS fee,
+  COALESCE((c.corrected_fields->>'net_pnl')::numeric,     g.net_pnl)       AS net_pnl,
+  (c.id IS NOT NULL)                                                       AS corrected,
+  c.reason                                                                 AS correction_reason
 FROM founder_alpha.fa_v2_grades g
 LEFT JOIN founder_alpha.fa_v2_grade_corrections c ON c.grade_id = g.id;
 
@@ -60,5 +62,22 @@ SELECT 57, 'entry_price_not_sealed_ask',
     'audit', '2026-07-26 three-approach validation (240/240 grades reproduced; this was the single mismatch)'),
   'claude-cto-2026-07-26-validation-audit'
 WHERE NOT EXISTS (SELECT 1 FROM founder_alpha.fa_v2_grade_corrections WHERE grade_id = 57);
+
+-- Corrections 2+3 (grades 39/40, window KXBTC15M-26JUL242030-30): the FIRST
+-- PRODUCTION RENDER of the reconciliation panel caught these — stored decisions
+-- say TAKE_NO (down_ask 0.51, settled yes = wrong) but the grades were written
+-- from a NO_TRADE in-memory reseal (same race class as grade 57, inverted).
+-- True grade: call_correct=false, entry 0.51, fee 0.02, net -0.53.
+INSERT INTO founder_alpha.fa_v2_grade_corrections (grade_id, reason, corrected_fields, evidence, corrected_by)
+SELECT g.id, 'graded_from_memory_reseal_as_NO_TRADE',
+  jsonb_build_object('recommendation','TAKE_NO','call_correct',false,'entry_price',0.51,'fee',0.02,'net_pnl',-0.53),
+  jsonb_build_object('window','KXBTC15M-26JUL242030-30','stored_decision','TAKE_NO','graded_as','NO_TRADE',
+    'stored_down_ask',0.51,'settled_outcome','yes',
+    'recompute','net = 0 - 0.51 - ceil(0.07*0.51*0.49*100)/100 = -0.53',
+    'found_by','live dashboard reconciliation panel, first production render 2026-07-26'),
+  'claude-cto-2026-07-26-validation-audit'
+FROM founder_alpha.fa_v2_grades g
+WHERE g.id IN (39,40)
+  AND NOT EXISTS (SELECT 1 FROM founder_alpha.fa_v2_grade_corrections c WHERE c.grade_id = g.id);
 
 COMMIT;

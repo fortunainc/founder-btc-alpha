@@ -95,3 +95,13 @@ git add src/validation.js src/dashboard.js src/v2/scheduler.js src/worker.js \
 git commit -m "Three-approach validation: audit-verified cards (native+H2H, version/timing split), every-call inspector, reconciliation panel; fix grade-57 pricing (stored-row grading + 008 corrections); quarantine settlement 333; 193/193 tests"
 git push
 ```
+
+
+---
+
+## ADDENDUM — post-deploy production verification (2026-07-26 ~02:45 UTC)
+
+- Push verified on origin (`03feed2` + provenance note `b8d5386`); Railway deployment ACTIVE; dashboard renders all validation sections (3 cards, timing tabs, version split, 3 inspectors: 646 forecast / 143 v2.1 / 114 v2.2 call rows embedded).
+- **The reconciliation panel earned its keep on its FIRST production render**: it flagged 2 failing identities → grades 39/40 (window 26JUL242030-30, pre-fix): stored decisions TAKE_NO (down_ask 0.51, settled yes = WRONG call) but graded from a NO_TRADE in-memory reseal (net 0, correct null) — the same race class as grade 57, inverted. Corrections appended (call_correct=false, net −0.53 each); canonical view extended to overlay recommendation/call_correct; migration 008 updated to match. **Panel now 10✅/0❌ in production.**
+- Corrected canonical nets after all 3 corrections: v2.1 −$13.80 · v2.2 −$1.04 (live sample at verification time; page recomputes per load).
+- Operator note: the push was executed by the local Claude CLI session; its import-check transiently started a second live worker for ~90s (18 excess capture rows 02:25–02:27 UTC, provenance-noted in-repo, no seal/settlement impact — verified independently: +18 rows exactly, seals unique-constraint protected, single writer since).
