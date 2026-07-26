@@ -96,8 +96,8 @@ function humanWindow(closeTs) {
 function guidedWhy(rev) {
   const f = rev.features ?? {};
   const bits = [];
-  const dist = rev.distance_usd != null ? Math.abs(Math.round(rev.distance_usd)) : null;
-  if (rev.spot != null && rev.strike != null) bits.push(`BTC is $${dist} ${rev.spot >= rev.strike ? 'above' : 'below'} the strike`);
+  const dist = rev.distance_usd != null ? Math.abs(Math.round(rev.distance_usd)) : (rev.spot != null && rev.strike != null ? Math.abs(Math.round(rev.spot - rev.strike)) : null);
+  if (dist != null && rev.spot != null && rev.strike != null) bits.push(`BTC is $${dist} ${rev.spot >= rev.strike ? 'above' : 'below'} the strike`);
   const t = f.trend ?? {};
   if (t.m15 === 'up' || t.m15 === 'down') bits.push(`the 15-minute trend points ${t.m15}`);
   if (f.continuity?.state === 'full_up') bits.push('all short timeframes agree upward');
