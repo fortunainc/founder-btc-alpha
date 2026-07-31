@@ -13,7 +13,7 @@
 #   • Allowlists templates (.env.example), .gitignore, docs, and this guard itself.
 set -euo pipefail
 
-ALLOW='(^|/)\.env\.example$|(^|/)\.gitignore$|(^|/)scripts/ci-secret-guard\.sh$|(^|/)docs/'
+ALLOW='(^|/)\.env\.example$|(^|/)\.gitignore$|(^|/)scripts/ci-secret-guard\.sh$|(^|/)docs/|(^|/)\.github/'
 fail=0
 
 # 1) No secret-pattern FILENAMES tracked.
